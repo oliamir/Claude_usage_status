@@ -1,8 +1,10 @@
-import XCTest
+import Testing
+import Foundation
 @testable import ClaudeUsageBar
 
-final class StoredCredentialsTests: XCTestCase {
-    func testStoreSavesAndLoadsCredentialBundle() throws {
+@Suite
+struct StoredCredentialsTests {
+    @Test func storeSavesAndLoadsCredentialBundle() throws {
         let store = try makeStore()
         let credentials = StoredCredentials(
             accessToken: "access-token",
@@ -13,16 +15,16 @@ final class StoredCredentialsTests: XCTestCase {
 
         try store.save(credentials)
 
-        let loaded = try XCTUnwrap(store.load(defaultScopes: []))
-        XCTAssertEqual(loaded, credentials)
+        let loaded = try #require(store.load(defaultScopes: []))
+        #expect(loaded == credentials)
 
         let filePermissions = try permissions(for: store.credentialsFileURL)
         let directoryPermissions = try permissions(for: store.directoryURL)
-        XCTAssertEqual(filePermissions, 0o600)
-        XCTAssertEqual(directoryPermissions, 0o700)
+        #expect(filePermissions == 0o600)
+        #expect(directoryPermissions == 0o700)
     }
 
-    func testStoreLoadsLegacyRawTokenFile() throws {
+    @Test func storeLoadsLegacyRawTokenFile() throws {
         let store = try makeStore()
         try "legacy-access-token".write(
             to: store.legacyTokenFileURL,
@@ -30,51 +32,51 @@ final class StoredCredentialsTests: XCTestCase {
             encoding: .utf8
         )
 
-        let loaded = try XCTUnwrap(
+        let loaded = try #require(
             store.load(defaultScopes: UsageService.defaultOAuthScopes)
         )
 
-        XCTAssertEqual(loaded.accessToken, "legacy-access-token")
-        XCTAssertNil(loaded.refreshToken)
-        XCTAssertNil(loaded.expiresAt)
-        XCTAssertEqual(loaded.scopes, UsageService.defaultOAuthScopes)
+        #expect(loaded.accessToken == "legacy-access-token")
+        #expect(loaded.refreshToken == nil)
+        #expect(loaded.expiresAt == nil)
+        #expect(loaded.scopes == UsageService.defaultOAuthScopes)
     }
 
     // MARK: - isExpired
 
-    func testIsExpiredReturnsFalseWhenExpiresAtIsNil() {
+    @Test func isExpiredReturnsFalseWhenExpiresAtIsNil() {
         let credentials = StoredCredentials(
             accessToken: "token",
             refreshToken: "refresh",
             expiresAt: nil,
             scopes: ["user:profile"]
         )
-        XCTAssertFalse(credentials.isExpired())
+        #expect(!credentials.isExpired())
     }
 
-    func testIsExpiredReturnsTrueWhenPastExpiry() {
+    @Test func isExpiredReturnsTrueWhenPastExpiry() {
         let credentials = StoredCredentials(
             accessToken: "token",
             refreshToken: "refresh",
             expiresAt: Date().addingTimeInterval(-60),
             scopes: ["user:profile"]
         )
-        XCTAssertTrue(credentials.isExpired())
+        #expect(credentials.isExpired())
     }
 
-    func testIsExpiredReturnsFalseWhenBeforeExpiry() {
+    @Test func isExpiredReturnsFalseWhenBeforeExpiry() {
         let credentials = StoredCredentials(
             accessToken: "token",
             refreshToken: "refresh",
             expiresAt: Date().addingTimeInterval(3600),
             scopes: ["user:profile"]
         )
-        XCTAssertFalse(credentials.isExpired())
+        #expect(!credentials.isExpired())
     }
 
     // MARK: - needsRefresh leeway
 
-    func testNeedsRefreshUses300SecondLeewayByDefault() {
+    @Test func needsRefreshUses300SecondLeewayByDefault() {
         let now = Date()
         let credentials = StoredCredentials(
             accessToken: "token",
@@ -82,8 +84,8 @@ final class StoredCredentialsTests: XCTestCase {
             expiresAt: now.addingTimeInterval(200),
             scopes: ["user:profile"]
         )
-        // 200s until expiry < 300s leeway → needs refresh
-        XCTAssertTrue(credentials.needsRefresh(at: now))
+        // 200s until expiry < 300s leeway -> needs refresh
+        #expect(credentials.needsRefresh(at: now))
 
         let safeCredentials = StoredCredentials(
             accessToken: "token",
@@ -91,8 +93,8 @@ final class StoredCredentialsTests: XCTestCase {
             expiresAt: now.addingTimeInterval(400),
             scopes: ["user:profile"]
         )
-        // 400s until expiry > 300s leeway → does not need refresh
-        XCTAssertFalse(safeCredentials.needsRefresh(at: now))
+        // 400s until expiry > 300s leeway -> does not need refresh
+        #expect(!safeCredentials.needsRefresh(at: now))
     }
 
     private func makeStore() throws -> StoredCredentialsStore {

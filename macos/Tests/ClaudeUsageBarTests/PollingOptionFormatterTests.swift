@@ -1,51 +1,53 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ClaudeUsageBar
 
-final class PollingOptionFormatterTests: XCTestCase {
-    func testLocalizedPollingIntervalUsesExpectedCompactLabels() {
+@Suite
+struct PollingOptionFormatterTests {
+    @Test func localizedPollingIntervalUsesExpectedCompactLabels() {
         let locale = Locale(identifier: "en_US_POSIX")
 
-        XCTAssertEqual(localizedPollingInterval(for: 5, locale: locale), "5m")
-        XCTAssertEqual(localizedPollingInterval(for: 15, locale: locale), "15m")
-        XCTAssertEqual(localizedPollingInterval(for: 30, locale: locale), "30m")
-        XCTAssertEqual(localizedPollingInterval(for: 60, locale: locale), "1h")
+        #expect(localizedPollingInterval(for: 5, locale: locale) == "5m")
+        #expect(localizedPollingInterval(for: 15, locale: locale) == "15m")
+        #expect(localizedPollingInterval(for: 30, locale: locale) == "30m")
+        #expect(localizedPollingInterval(for: 60, locale: locale) == "1h")
     }
 
-    func testRecommendedPollingOptionsDoNotGetWarningSuffix() {
+    @Test func recommendedPollingOptionsDoNotGetWarningSuffix() {
         let locale = Locale(identifier: "en_US_POSIX")
 
-        XCTAssertEqual(pollingOptionLabel(for: 30, locale: locale), "30m")
-        XCTAssertEqual(pollingOptionLabel(for: 60, locale: locale), "1h")
+        #expect(pollingOptionLabel(for: 30, locale: locale) == "30m")
+        #expect(pollingOptionLabel(for: 60, locale: locale) == "1h")
     }
 
-    func testDiscouragedPollingOptionsUseLocalizedWarningSuffix() {
+    @Test func discouragedPollingOptionsUseLocalizedWarningSuffix() {
         let locale = Locale(identifier: "en_US_POSIX")
 
-        XCTAssertEqual(pollingOptionLabel(for: 5, locale: locale), "5m (not recommended)")
-        XCTAssertEqual(pollingOptionLabel(for: 15, locale: locale), "15m (not recommended)")
+        #expect(pollingOptionLabel(for: 5, locale: locale) == "5m (not recommended)")
+        #expect(pollingOptionLabel(for: 15, locale: locale) == "15m (not recommended)")
     }
 
-    func testSupportedPollingOptionsAllProduceNonEmptyLabels() {
+    @Test func supportedPollingOptionsAllProduceNonEmptyLabels() {
         let locale = Locale(identifier: "en_US_POSIX")
         let pollingOptions = [5, 15, 30, 60]
 
         for minutes in pollingOptions {
-            XCTAssertFalse(pollingOptionLabel(for: minutes, locale: locale).isEmpty)
+            #expect(!pollingOptionLabel(for: minutes, locale: locale).isEmpty)
         }
     }
 
-    func testDiscouragedPollingOptionsAreFlaggedSeparately() {
-        XCTAssertTrue(isDiscouragedPollingOption(5))
-        XCTAssertTrue(isDiscouragedPollingOption(15))
-        XCTAssertFalse(isDiscouragedPollingOption(30))
-        XCTAssertFalse(isDiscouragedPollingOption(60))
+    @Test func discouragedPollingOptionsAreFlaggedSeparately() {
+        #expect(isDiscouragedPollingOption(5))
+        #expect(isDiscouragedPollingOption(15))
+        #expect(!isDiscouragedPollingOption(30))
+        #expect(!isDiscouragedPollingOption(60))
     }
 
-    func testDiscouragedPollingOptionsFallBackWhenResourceBundleIsUnavailable() {
+    @Test func discouragedPollingOptionsFallBackWhenResourceBundleIsUnavailable() {
         let locale = Locale(identifier: "en_US_POSIX")
 
-        XCTAssertEqual(
-            pollingOptionLabel(for: 5, locale: locale, resourceBundle: nil),
+        #expect(
+            pollingOptionLabel(for: 5, locale: locale, resourceBundle: nil) ==
             "5m (not recommended)"
         )
     }

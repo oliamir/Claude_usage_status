@@ -5,6 +5,7 @@ struct PopoverView: View {
     @ObservedObject var historyService: UsageHistoryService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
+    @ObservedObject var statusService: StatusService
     @AppStorage("setupComplete") private var setupComplete = false
 
     var body: some View {
@@ -51,6 +52,11 @@ struct PopoverView: View {
                 .font(.caption)
         }
 
+        if statusService.statusSummary != nil || statusService.lastError != nil {
+            Divider()
+            StatusSectionView(statusService: statusService)
+        }
+
         Divider()
         HStack {
             settingsButton
@@ -93,6 +99,11 @@ struct PopoverView: View {
 
         Divider()
         UsageChartView(historyService: historyService)
+
+        if statusService.statusSummary != nil || statusService.lastError != nil {
+            Divider()
+            StatusSectionView(statusService: statusService)
+        }
 
         if let error = service.lastError {
             Divider()

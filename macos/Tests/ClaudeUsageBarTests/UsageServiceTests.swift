@@ -1,28 +1,26 @@
-import XCTest
+import Testing
+import Foundation
 @testable import ClaudeUsageBar
 
+@Suite(.serialized)
 @MainActor
-final class UsageServiceTests: XCTestCase {
-    override func tearDown() {
-        MockURLProtocol.handler = nil
-        super.tearDown()
-    }
+struct UsageServiceTests {
 
-    func testBackoffIntervalCapsAtSixtyMinutes() {
-        XCTAssertEqual(
-            UsageService.backoffInterval(retryAfter: 120, currentInterval: 30 * 60),
+    @Test func backoffIntervalCapsAtSixtyMinutes() {
+        #expect(
+            UsageService.backoffInterval(retryAfter: 120, currentInterval: 30 * 60) ==
             60 * 60
         )
     }
 
-    func testBackoffIntervalNeverReducesSixtyMinutePolling() {
-        XCTAssertEqual(
-            UsageService.backoffInterval(retryAfter: 120, currentInterval: 60 * 60),
+    @Test func backoffIntervalNeverReducesSixtyMinutePolling() {
+        #expect(
+            UsageService.backoffInterval(retryAfter: 120, currentInterval: 60 * 60) ==
             60 * 60
         )
     }
 
-    func testFetchUsageRefreshesOn401AndRetriesOnce() async throws {
+    @Test func fetchUsageRefreshesOn401AndRetriesOnce() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -46,11 +44,11 @@ final class UsageServiceTests: XCTestCase {
             case ("GET", "/api/oauth/usage", "Bearer old-access"):
                 return try Self.httpResponse(url: usageURL, statusCode: 401)
             case ("POST", "/v1/oauth/token", _):
-                let body = try XCTUnwrap(Self.jsonBody(for: request))
-                XCTAssertEqual(body["grant_type"], "refresh_token")
-                XCTAssertEqual(body["refresh_token"], "refresh-old")
-                XCTAssertEqual(body["client_id"], "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
-                XCTAssertEqual(body["scope"], "user:profile user:inference")
+                let body = try #require(Self.jsonBody(for: request))
+                #expect(body["grant_type"] == "refresh_token")
+                #expect(body["refresh_token"] == "refresh-old")
+                #expect(body["client_id"] == "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
+                #expect(body["scope"] == "user:profile user:inference")
 
                 return try Self.httpResponse(
                     url: tokenURL,
@@ -76,10 +74,11 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: session,
@@ -91,18 +90,18 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertNil(service.lastError)
-        XCTAssertEqual(service.usage?.fiveHour?.utilization, 12)
-        XCTAssertEqual(requests.count, 3)
+        #expect(service.isAuthenticated)
+        #expect(service.lastError == nil)
+        #expect(service.usage?.fiveHour?.utilization == 12)
+        #expect(requests.count == 3)
 
-        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(saved.accessToken, "new-access")
-        XCTAssertEqual(saved.refreshToken, "refresh-new")
-        XCTAssertNotNil(saved.expiresAt)
+        let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(saved.accessToken == "new-access")
+        #expect(saved.refreshToken == "refresh-new")
+        #expect(saved.expiresAt != nil)
     }
 
-    func testFetchUsageDoesNotSignOutWhenRetriedRequestIsRateLimited() async throws {
+    @Test func fetchUsageDoesNotSignOutWhenRetriedRequestIsRateLimited() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -141,10 +140,11 @@ final class UsageServiceTests: XCTestCase {
                     headers: ["Retry-After": "120"]
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -156,15 +156,15 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Rate limited — backing off to 3600s")
+        #expect(service.isAuthenticated)
+        #expect(service.lastError == "Rate limited — backing off to 3600s")
 
-        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(saved.accessToken, "new-access")
-        XCTAssertEqual(saved.refreshToken, "refresh-old")
+        let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(saved.accessToken == "new-access")
+        #expect(saved.refreshToken == "refresh-old")
     }
 
-    func testFetchUsageSignsOutWhenRefreshFails() async throws {
+    @Test func fetchUsageSignsOutWhenRefreshFails() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -191,10 +191,11 @@ final class UsageServiceTests: XCTestCase {
                     body: #"{"error":"invalid_grant"}"#
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -206,12 +207,12 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertFalse(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Session expired — please sign in again")
-        XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(!service.isAuthenticated)
+        #expect(service.lastError == "Session expired — please sign in again")
+        #expect(store.load(defaultScopes: UsageService.defaultOAuthScopes) == nil)
     }
 
-    func testFetchProfileDoesNotSignOutWhenUserinfoStillReturns401AfterRefresh() async throws {
+    @Test func fetchProfileDoesNotSignOutWhenUserinfoStillReturns401AfterRefresh() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -247,10 +248,11 @@ final class UsageServiceTests: XCTestCase {
             case ("GET", "/api/oauth/userinfo", "Bearer new-access"):
                 return try Self.httpResponse(url: userinfoURL, statusCode: 401)
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -263,18 +265,18 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchProfile()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertNil(service.accountEmail)
-        XCTAssertNil(service.lastError)
+        #expect(service.isAuthenticated)
+        #expect(service.accountEmail == nil)
+        #expect(service.lastError == nil)
 
-        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(saved.accessToken, "new-access")
-        XCTAssertEqual(saved.refreshToken, "refresh-new")
+        let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(saved.accessToken == "new-access")
+        #expect(saved.refreshToken == "refresh-new")
     }
 
     // MARK: - Transient vs permanent refresh failure
 
-    func testServer500DuringRefreshStaysAuthenticated() async throws {
+    @Test func server500DuringRefreshStaysAuthenticated() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -297,10 +299,11 @@ final class UsageServiceTests: XCTestCase {
             case ("POST", "/v1/oauth/token", _):
                 return try Self.httpResponse(url: tokenURL, statusCode: 500)
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -312,12 +315,12 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Token refresh failed — will retry")
-        XCTAssertNotNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(service.isAuthenticated)
+        #expect(service.lastError == "Token refresh failed — will retry")
+        #expect(store.load(defaultScopes: UsageService.defaultOAuthScopes) != nil)
     }
 
-    func testNetworkErrorDuringRefreshStaysAuthenticated() async throws {
+    @Test func networkErrorDuringRefreshStaysAuthenticated() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -340,10 +343,11 @@ final class UsageServiceTests: XCTestCase {
             case ("POST", "/v1/oauth/token", _):
                 throw URLError(.notConnectedToInternet)
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -355,12 +359,12 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Token refresh failed — will retry")
-        XCTAssertNotNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(service.isAuthenticated)
+        #expect(service.lastError == "Token refresh failed — will retry")
+        #expect(store.load(defaultScopes: UsageService.defaultOAuthScopes) != nil)
     }
 
-    func testExpiredTokenWithTransientRefreshFailureDoesNotMakeAPICall() async throws {
+    @Test func expiredTokenWithTransientRefreshFailureDoesNotMakeAPICall() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -383,10 +387,11 @@ final class UsageServiceTests: XCTestCase {
                 usageRequestCount += 1
                 return try Self.httpResponse(url: usageURL, statusCode: 200, body: "{}")
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -398,12 +403,12 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Token refresh failed — will retry")
-        XCTAssertEqual(usageRequestCount, 0, "Should not make API call when token is expired and refresh failed")
+        #expect(service.isAuthenticated)
+        #expect(service.lastError == "Token refresh failed — will retry")
+        #expect(usageRequestCount == 0, "Should not make API call when token is expired and refresh failed")
     }
 
-    func testExpiredTokenWithPermanentRefreshFailureSignsOut() async throws {
+    @Test func expiredTokenWithPermanentRefreshFailureSignsOut() async throws {
         let store = try makeStore()
         try store.save(
             StoredCredentials(
@@ -426,10 +431,11 @@ final class UsageServiceTests: XCTestCase {
                     body: #"{"error":"invalid_grant"}"#
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -441,21 +447,14 @@ final class UsageServiceTests: XCTestCase {
 
         await service.fetchUsage()
 
-        XCTAssertFalse(service.isAuthenticated)
-        XCTAssertEqual(service.lastError, "Session expired — please sign in again")
-        XCTAssertNil(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(!service.isAuthenticated)
+        #expect(service.lastError == "Session expired — please sign in again")
+        #expect(store.load(defaultScopes: UsageService.defaultOAuthScopes) == nil)
     }
 
     // MARK: - End-to-end refresh recovery simulation
 
-    /// Simulates three consecutive polling cycles during a refresh server outage:
-    ///
-    /// Poll 1: Token nearing expiry, refresh server is down (500).
-    ///         Token isn't expired yet → API call proceeds → usage fetched.
-    /// Poll 2: Token now expired, refresh server still down.
-    ///         Proactive refresh fails, token is expired → skips API call, stays signed in.
-    /// Poll 3: Refresh server recovers → refresh succeeds → usage fetched with new token.
-    func testEndToEndRefreshRecoveryAcrossMultiplePolls() async throws {
+    @Test func endToEndRefreshRecoveryAcrossMultiplePolls() async throws {
         let store = try makeStore()
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
@@ -495,10 +494,11 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         // Save initial credentials BEFORE creating the service so isAuthenticated = true
         try store.save(StoredCredentials(
@@ -516,18 +516,16 @@ final class UsageServiceTests: XCTestCase {
             credentialsStore: store
         )
 
-        // ── Poll 1: token nearing expiry (within 300s leeway), refresh server down ──
-        // Token not yet expired → API call still proceeds → usage fetched successfully
+        // -- Poll 1: token nearing expiry (within 300s leeway), refresh server down --
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated, "Poll 1: must stay authenticated")
-        XCTAssertNil(service.lastError, "Poll 1: usage succeeded so no error")
-        XCTAssertEqual(service.usage?.fiveHour?.utilization, 10, "Poll 1: usage should update")
-        XCTAssertEqual(usageRequestTokens.count, 1, "Poll 1: exactly one API call")
-        XCTAssertEqual(usageRequestTokens.last, "Bearer access-1")
+        #expect(service.isAuthenticated, "Poll 1: must stay authenticated")
+        #expect(service.lastError == nil, "Poll 1: usage succeeded so no error")
+        #expect(service.usage?.fiveHour?.utilization == 10, "Poll 1: usage should update")
+        #expect(usageRequestTokens.count == 1, "Poll 1: exactly one API call")
+        #expect(usageRequestTokens.last == "Bearer access-1")
 
-        // ── Poll 2: token now expired, refresh server still down ──
-        // Proactive refresh fails + token is expired → skip API call, but stay signed in
+        // -- Poll 2: token now expired, refresh server still down --
         phase = 2
         try store.save(StoredCredentials(
             accessToken: "access-1",
@@ -537,30 +535,27 @@ final class UsageServiceTests: XCTestCase {
         ))
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated, "Poll 2: must NOT sign out on transient failure")
-        XCTAssertEqual(service.lastError, "Token refresh failed — will retry")
-        XCTAssertEqual(service.usage?.fiveHour?.utilization, 10, "Poll 2: usage unchanged")
-        XCTAssertEqual(usageRequestTokens.count, 1, "Poll 2: no new API call (token expired)")
+        #expect(service.isAuthenticated, "Poll 2: must NOT sign out on transient failure")
+        #expect(service.lastError == "Token refresh failed — will retry")
+        #expect(service.usage?.fiveHour?.utilization == 10, "Poll 2: usage unchanged")
+        #expect(usageRequestTokens.count == 1, "Poll 2: no new API call (token expired)")
 
-        // ── Poll 3: refresh server recovers ──
-        // Refresh succeeds → API call with new token → usage updated
+        // -- Poll 3: refresh server recovers --
         phase = 3
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated, "Poll 3: authenticated after recovery")
-        XCTAssertNil(service.lastError, "Poll 3: error cleared")
-        XCTAssertEqual(service.usage?.fiveHour?.utilization, 30, "Poll 3: usage updated")
-        XCTAssertEqual(usageRequestTokens.count, 2, "Poll 3: one new API call")
-        XCTAssertEqual(usageRequestTokens.last, "Bearer access-refreshed")
+        #expect(service.isAuthenticated, "Poll 3: authenticated after recovery")
+        #expect(service.lastError == nil, "Poll 3: error cleared")
+        #expect(service.usage?.fiveHour?.utilization == 30, "Poll 3: usage updated")
+        #expect(usageRequestTokens.count == 2, "Poll 3: one new API call")
+        #expect(usageRequestTokens.last == "Bearer access-refreshed")
 
-        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(saved.accessToken, "access-refreshed")
-        XCTAssertEqual(saved.refreshToken, "refresh-2")
+        let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(saved.accessToken == "access-refreshed")
+        #expect(saved.refreshToken == "refresh-2")
     }
 
-    /// Simulates a 401 during normal API usage followed by transient refresh failure,
-    /// then recovery on the next poll.
-    func testEndToEnd401WithTransientFailureThenRecovery() async throws {
+    @Test func endToEnd401WithTransientFailureThenRecovery() async throws {
         let store = try makeStore()
         try store.save(StoredCredentials(
             accessToken: "access-1",
@@ -580,10 +575,8 @@ final class UsageServiceTests: XCTestCase {
             switch (request.httpMethod, request.url?.path) {
             case ("POST", "/v1/oauth/token"):
                 if phase == 1 {
-                    // Phase 1: network blip during refresh
                     throw URLError(.networkConnectionLost)
                 }
-                // Phase 2: server recovered
                 return try Self.httpResponse(
                     url: tokenURL,
                     statusCode: 200,
@@ -598,7 +591,6 @@ final class UsageServiceTests: XCTestCase {
                 )
             case ("GET", "/api/oauth/usage"):
                 if auth == "Bearer access-1" {
-                    // Old token always gets rejected
                     return try Self.httpResponse(url: usageURL, statusCode: 401)
                 }
                 return try Self.httpResponse(
@@ -612,10 +604,11 @@ final class UsageServiceTests: XCTestCase {
                     """
                 )
             default:
-                XCTFail("Unexpected request: \(request)")
+                Issue.record("Unexpected request: \(request)")
                 return try Self.httpResponse(url: request.url!, statusCode: 500)
             }
         }
+        defer { MockURLProtocol.handler = nil }
 
         let service = UsageService(
             session: makeSession(),
@@ -625,25 +618,24 @@ final class UsageServiceTests: XCTestCase {
             credentialsStore: store
         )
 
-        // ── Poll 1: API returns 401, refresh fails (network) → stays authenticated ──
+        // -- Poll 1: API returns 401, refresh fails (network) -> stays authenticated --
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated, "Must not sign out on transient refresh failure")
-        XCTAssertEqual(service.lastError, "Token refresh failed — will retry")
-        XCTAssertNil(service.usage, "No usage data yet")
+        #expect(service.isAuthenticated, "Must not sign out on transient refresh failure")
+        #expect(service.lastError == "Token refresh failed — will retry")
+        #expect(service.usage == nil, "No usage data yet")
 
-        // ── Poll 2: next cycle, server is healthy → everything works ──
+        // -- Poll 2: next cycle, server is healthy -> everything works --
         phase = 2
-        // API will return 401 for old token, refresh succeeds, retry with new token succeeds
         await service.fetchUsage()
 
-        XCTAssertTrue(service.isAuthenticated, "Authenticated after recovery")
-        XCTAssertNil(service.lastError, "Error cleared")
-        XCTAssertEqual(service.usage?.fiveHour?.utilization, 42)
+        #expect(service.isAuthenticated, "Authenticated after recovery")
+        #expect(service.lastError == nil, "Error cleared")
+        #expect(service.usage?.fiveHour?.utilization == 42)
 
-        let saved = try XCTUnwrap(store.load(defaultScopes: UsageService.defaultOAuthScopes))
-        XCTAssertEqual(saved.accessToken, "access-2")
-        XCTAssertEqual(saved.refreshToken, "refresh-2")
+        let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
+        #expect(saved.accessToken == "access-2")
+        #expect(saved.refreshToken == "refresh-2")
     }
 
     private func makeStore() throws -> StoredCredentialsStore {
@@ -699,20 +691,24 @@ final class UsageServiceTests: XCTestCase {
         headers: [String: String] = [:],
         body: String = ""
     ) throws -> (HTTPURLResponse, Data) {
-        let response = try XCTUnwrap(
-            HTTPURLResponse(
-                url: url,
-                statusCode: statusCode,
-                httpVersion: nil,
-                headerFields: headers
-            )
-        )
+        guard let response = HTTPURLResponse(
+            url: url,
+            statusCode: statusCode,
+            httpVersion: nil,
+            headerFields: headers
+        ) else {
+            throw MockError(message: "Failed to create HTTPURLResponse")
+        }
         return (response, Data(body.utf8))
     }
 }
 
+private struct MockError: Error {
+    let message: String
+}
+
 private final class MockURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool {
         true

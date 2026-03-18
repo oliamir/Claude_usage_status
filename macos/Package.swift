@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 
 import PackageDescription
 
@@ -9,7 +9,8 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.8.1")
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.8.1"),
+        .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "0.12.0")
     ],
     targets: [
         .executableTarget(
@@ -21,14 +22,26 @@ let package = Package(
             resources: [
                 .process("Resources")
             ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ],
             linkerSettings: [
                 .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])
             ]
         ),
         .testTarget(
             name: "ClaudeUsageBarTests",
-            dependencies: ["ClaudeUsageBar"],
-            path: "Tests/ClaudeUsageBarTests"
+            dependencies: [
+                "ClaudeUsageBar",
+                .product(name: "Testing", package: "swift-testing")
+            ],
+            path: "Tests/ClaudeUsageBarTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .unsafeFlags([
+                    "-Xfrontend", "-disable-cross-import-overlays"
+                ])
+            ]
         )
     ]
 )

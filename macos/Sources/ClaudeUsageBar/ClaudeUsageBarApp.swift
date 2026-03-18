@@ -6,6 +6,7 @@ struct ClaudeUsageBarApp: App {
     @StateObject private var historyService = UsageHistoryService()
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
+    @StateObject private var statusService = StatusService()
 
     var body: some Scene {
         MenuBarExtra {
@@ -13,12 +14,13 @@ struct ClaudeUsageBarApp: App {
                 service: service,
                 historyService: historyService,
                 notificationService: notificationService,
-                appUpdater: appUpdater
+                appUpdater: appUpdater,
+                statusService: statusService
             )
         } label: {
             Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d)
-                : renderUnauthenticatedIcon()
+                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d, statusIndicator: statusService.overallIndicator)
+                : renderUnauthenticatedIcon(statusIndicator: statusService.overallIndicator)
             )
                 .task {
                     // Auto-mark existing users as setup-complete
@@ -29,6 +31,7 @@ struct ClaudeUsageBarApp: App {
                     service.historyService = historyService
                     service.notificationService = notificationService
                     service.startPolling()
+                    statusService.startPolling()
                 }
         }
         .menuBarExtraStyle(.window)

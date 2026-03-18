@@ -8,8 +8,10 @@ private let labelGap: CGFloat = 2
 private let cornerRadius: CGFloat = 2
 private let logoSize: CGFloat = 12
 private let logoGap: CGFloat = 2
+private let dotPadding: CGFloat = 2
+private let dotDiameter: CGFloat = 4
 private let barsWidth: CGFloat = labelWidth + labelGap + barWidth + 2
-private let iconWidth: CGFloat = logoSize + logoGap + barsWidth
+private let iconWidth: CGFloat = logoSize + logoGap + barsWidth + dotPadding
 private let iconHeight: CGFloat = 18
 private let fontSize: CGFloat = 8
 
@@ -37,7 +39,7 @@ private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloa
     drawBarFill(barX, barY)
 }
 
-func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
+func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator = .none) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
@@ -52,13 +54,16 @@ func renderIcon(pct5h: Double, pct7d: Double) -> NSImage {
         drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)
         }
+        if statusIndicator != .none {
+            drawStatusDot(iconWidth: iconWidth)
+        }
         return true
     }
     image.isTemplate = true
     return image
 }
 
-func renderUnauthenticatedIcon() -> NSImage {
+func renderUnauthenticatedIcon(statusIndicator: StatusIndicator = .none) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
@@ -73,10 +78,22 @@ func renderUnauthenticatedIcon() -> NSImage {
         drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         }
+        if statusIndicator != .none {
+            drawStatusDot(iconWidth: iconWidth)
+        }
         return true
     }
     image.isTemplate = true
     return image
+}
+
+// MARK: - Status dot
+
+private func drawStatusDot(iconWidth: CGFloat) {
+    let dotRect = NSRect(x: iconWidth - dotDiameter, y: 1, width: dotDiameter, height: dotDiameter)
+    let dotPath = NSBezierPath(ovalIn: dotRect)
+    NSColor.black.setFill()
+    dotPath.fill()
 }
 
 // MARK: - Bar drawing

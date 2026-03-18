@@ -1,9 +1,11 @@
-import XCTest
+import Foundation
+import Testing
 @testable import ClaudeUsageBar
 
-final class SettingsViewTests: XCTestCase {
-    func testSupportsLaunchAtLoginManagementForSystemApplications() {
-        XCTAssertTrue(
+@Suite
+struct SettingsViewTests {
+    @Test func supportsLaunchAtLoginManagementForSystemApplications() {
+        #expect(
             supportsLaunchAtLoginManagement(
                 appURL: URL(fileURLWithPath: "/Applications/ClaudeUsageBar.app"),
                 installDirectories: [
@@ -14,8 +16,8 @@ final class SettingsViewTests: XCTestCase {
         )
     }
 
-    func testSupportsLaunchAtLoginManagementForUserApplications() {
-        XCTAssertTrue(
+    @Test func supportsLaunchAtLoginManagementForUserApplications() {
+        #expect(
             supportsLaunchAtLoginManagement(
                 appURL: URL(fileURLWithPath: "/Users/test/Applications/ClaudeUsageBar.app"),
                 installDirectories: [
@@ -26,9 +28,9 @@ final class SettingsViewTests: XCTestCase {
         )
     }
 
-    func testDoesNotSupportLaunchAtLoginOutsideApplicationsFolders() {
-        XCTAssertFalse(
-            supportsLaunchAtLoginManagement(
+    @Test func doesNotSupportLaunchAtLoginOutsideApplicationsFolders() {
+        #expect(
+            !supportsLaunchAtLoginManagement(
                 appURL: URL(fileURLWithPath: "/Users/test/Downloads/ClaudeUsageBar.app"),
                 installDirectories: [
                     URL(fileURLWithPath: "/Applications", isDirectory: true),
