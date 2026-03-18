@@ -2,7 +2,17 @@
   <img src="macos/Resources/icon.png" width="128" alt="Claude Usage Bar icon">
 </p>
 
-# Claude Usage Bar
+# Claude Usage Bar + Service Status
+
+> **Fork of [Blimp-Labs/claude-usage-bar](https://github.com/Blimp-Labs/claude-usage-bar)** — all credit for the original app goes to the Blimp Labs team.
+
+This fork adds **Claude AI service status monitoring** from [status.claude.com](https://status.claude.com), including:
+- Menu bar status dot indicator (appears when services are degraded)
+- Service Status section in the popover showing all 5 Claude components
+- Active incident banners with impact severity and latest updates
+- Clickable link to status.claude.com for full details
+
+---
 
 Have you ever found yourself refreshing the Claude usage page, wondering how close you are to hitting your rate limit? Yeah, I've been there too. So I built this.
 
