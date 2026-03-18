@@ -2,8 +2,10 @@ import Foundation
 import Combine
 import CryptoKit
 import AppKit
+import os
 @MainActor
 class UsageService: ObservableObject {
+    private static let logger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "UsageService")
     @Published var usage: UsageResponse?
     @Published var lastError: String?
     @Published var lastUpdated: Date?
@@ -194,7 +196,8 @@ class UsageService: ObservableObject {
             }
             guard http.statusCode == 200 else {
                 let bodyStr = String(data: data, encoding: .utf8) ?? ""
-                lastError = "Token exchange failed: HTTP \(http.statusCode) \(bodyStr)"
+                Self.logger.error("Token exchange failed: HTTP \(http.statusCode) body: \(bodyStr, privacy: .private)")
+                lastError = "Token exchange failed (HTTP \(http.statusCode))"
                 return
             }
 
@@ -207,7 +210,8 @@ class UsageService: ObservableObject {
             do {
                 try saveCredentials(credentials)
             } catch {
-                lastError = "Failed to save credentials: \(error.localizedDescription)"
+                Self.logger.error("Failed to save credentials: \(error.localizedDescription, privacy: .private)")
+                lastError = "Failed to save credentials"
                 return
             }
             isAuthenticated = true
@@ -219,7 +223,8 @@ class UsageService: ObservableObject {
             await fetchProfile()
             startPolling()
         } catch {
-            lastError = "Token exchange error: \(error.localizedDescription)"
+            Self.logger.error("Token exchange error: \(error.localizedDescription, privacy: .private)")
+            lastError = "Token exchange error — check your network connection"
         }
     }
 

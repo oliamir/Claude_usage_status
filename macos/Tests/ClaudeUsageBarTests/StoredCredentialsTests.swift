@@ -5,7 +5,9 @@ import Foundation
 @Suite
 struct StoredCredentialsTests {
     @Test func storeSavesAndLoadsCredentialBundle() throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
+
         let credentials = StoredCredentials(
             accessToken: "access-token",
             refreshToken: "refresh-token",
@@ -17,15 +19,12 @@ struct StoredCredentialsTests {
 
         let loaded = try #require(store.load(defaultScopes: []))
         #expect(loaded == credentials)
-
-        let filePermissions = try permissions(for: store.credentialsFileURL)
-        let directoryPermissions = try permissions(for: store.directoryURL)
-        #expect(filePermissions == 0o600)
-        #expect(directoryPermissions == 0o700)
     }
 
     @Test func storeLoadsLegacyRawTokenFile() throws {
-        let store = try makeStore()
+        let store = try makeStoreWithDirectory()
+        defer { store.delete() }
+
         try "legacy-access-token".write(
             to: store.legacyTokenFileURL,
             atomically: true,
@@ -38,8 +37,48 @@ struct StoredCredentialsTests {
 
         #expect(loaded.accessToken == "legacy-access-token")
         #expect(loaded.refreshToken == nil)
-        #expect(loaded.expiresAt == nil)
+        // Legacy tokens get a 24h default expiry
+        let expected = Date().addingTimeInterval(24 * 3600)
+        #expect(abs(loaded.expiresAt!.timeIntervalSince(expected)) < 5)
         #expect(loaded.scopes == UsageService.defaultOAuthScopes)
+    }
+
+    @Test func storeMigratesCredentialsJsonToKeychain() throws {
+        let store = try makeStoreWithDirectory()
+        defer { store.delete() }
+
+        let credentials = StoredCredentials(
+            accessToken: "migrated-token",
+            refreshToken: "migrated-refresh",
+            expiresAt: Date(timeIntervalSince1970: 1_741_194_400),
+            scopes: ["user:profile"]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(credentials)
+        try data.write(to: store.credentialsFileURL, options: .atomic)
+
+        let loaded = try #require(store.load(defaultScopes: []))
+        #expect(loaded == credentials)
+
+        // Legacy file should be cleaned up after migration
+        #expect(!FileManager.default.fileExists(atPath: store.credentialsFileURL.path))
+    }
+
+    @Test func deleteRemovesFromKeychain() throws {
+        let store = makeStore()
+        let credentials = StoredCredentials(
+            accessToken: "token-to-delete",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(3600),
+            scopes: ["user:profile"]
+        )
+
+        try store.save(credentials)
+        #expect(store.load(defaultScopes: []) != nil)
+
+        store.delete()
+        #expect(store.load(defaultScopes: []) == nil)
     }
 
     // MARK: - isExpired
@@ -97,15 +136,23 @@ struct StoredCredentialsTests {
         #expect(!safeCredentials.needsRefresh(at: now))
     }
 
-    private func makeStore() throws -> StoredCredentialsStore {
+    // MARK: - Helpers
+
+    private func makeStore() -> StoredCredentialsStore {
+        StoredCredentialsStore(
+            serviceName: "com.local.ClaudeUsageBar.test.\(UUID().uuidString)",
+            accountName: "test-credentials"
+        )
+    }
+
+    private func makeStoreWithDirectory() throws -> StoredCredentialsStore {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory)
-    }
-
-    private func permissions(for url: URL) throws -> Int {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return attributes[.posixPermissions] as? Int ?? -1
+        return StoredCredentialsStore(
+            directoryURL: directory,
+            serviceName: "com.local.ClaudeUsageBar.test.\(UUID().uuidString)",
+            accountName: "test-credentials"
+        )
     }
 }

@@ -17,6 +17,7 @@ class UsageHistoryService: ObservableObject {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/claude-usage-bar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         return dir.appendingPathComponent("history.json")
     }
 
@@ -75,6 +76,7 @@ class UsageHistoryService: ObservableObject {
 
         guard let data = try? JSONEncoder.historyEncoder.encode(history) else { return }
         try? data.write(to: Self.historyFileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Self.historyFileURL.path)
 
         isDirty = false
         flushTimer?.cancel()

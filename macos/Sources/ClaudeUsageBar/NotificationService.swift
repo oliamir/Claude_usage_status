@@ -1,4 +1,5 @@
 import Foundation
+import os
 @preconcurrency import UserNotifications
 
 struct ThresholdAlert: Equatable {
@@ -56,6 +57,7 @@ private class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 
 @MainActor
 class NotificationService: ObservableObject {
+    private nonisolated static let logger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "Notifications")
     /// 0 = off, 5–100 = alert when window reaches this %.
     @Published private(set) var threshold5h: Int
     @Published private(set) var threshold7d: Int
@@ -135,7 +137,7 @@ class NotificationService: ObservableObject {
 
     private func sendNotification(window: String, pct: Int) {
         guard Bundle.main.bundleIdentifier != nil else {
-            print("[Notification] \(window) usage has reached \(pct)% (no bundle – skipped)")
+            Self.logger.debug("Skipped notification for \(window) at \(pct)% — no bundle identifier")
             return
         }
 
@@ -152,9 +154,9 @@ class NotificationService: ObservableObject {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("[Notification] Failed to deliver: \(error)")
+                Self.logger.error("Failed to deliver notification: \(error.localizedDescription)")
             } else {
-                print("[Notification] Delivered: \(window) at \(pct)%")
+                Self.logger.debug("Delivered notification: \(window) at \(pct)%")
             }
         }
     }

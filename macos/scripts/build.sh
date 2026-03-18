@@ -10,6 +10,9 @@ ZIP_PATH="$PROJECT_DIR/$APP_NAME.zip"
 DMG_PATH="$PROJECT_DIR/$APP_NAME.dmg"
 CREATE_DMG_VERSION="v1.2.3"
 CREATE_DMG_TARBALL_URL="https://github.com/create-dmg/create-dmg/archive/refs/tags/${CREATE_DMG_VERSION}.tar.gz"
+# Update this hash when bumping CREATE_DMG_VERSION:
+#   curl -fsSL "$CREATE_DMG_TARBALL_URL" | shasum -a 256
+CREATE_DMG_SHA256="8cf7b4ae540801171f4f630f1f2956913aaa87483b7ac03458f52b6cd0c48953"
 DMG_RESOURCES_DIR="$PROJECT_DIR/Resources/dmg"
 DMG_BACKGROUND_SOURCE="$DMG_RESOURCES_DIR/background.png"
 APP_ICON_SOURCE="$PROJECT_DIR/Resources/AppIcon.icns"
@@ -187,7 +190,18 @@ create_dmg() {
 
     ditto "$APP_BUNDLE" "$staging_dir/$APP_NAME.app"
     create_applications_alias "$staging_dir"
-    curl -fsSL "$CREATE_DMG_TARBALL_URL" | tar -xzf - -C "$create_dmg_root" --strip-components=1
+    CREATE_DMG_TARBALL="$create_dmg_root/create-dmg.tar.gz"
+    curl -fsSL -o "$CREATE_DMG_TARBALL" "$CREATE_DMG_TARBALL_URL"
+    ACTUAL_HASH="$(shasum -a 256 "$CREATE_DMG_TARBALL" | awk '{print $1}')"
+    if [[ "$ACTUAL_HASH" != "$CREATE_DMG_SHA256" ]]; then
+        echo "Error: create-dmg checksum mismatch"
+        echo "  Expected: $CREATE_DMG_SHA256"
+        echo "  Got:      $ACTUAL_HASH"
+        rm -f "$CREATE_DMG_TARBALL"
+        exit 1
+    fi
+    tar -xzf "$CREATE_DMG_TARBALL" -C "$create_dmg_root" --strip-components=1
+    rm -f "$CREATE_DMG_TARBALL"
     chmod +x "$create_dmg_tool"
 
     create_dmg_args=(

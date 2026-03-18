@@ -21,7 +21,8 @@ struct UsageServiceTests {
     }
 
     @Test func fetchUsageRefreshesOn401AndRetriesOnce() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -102,7 +103,8 @@ struct UsageServiceTests {
     }
 
     @Test func fetchUsageDoesNotSignOutWhenRetriedRequestIsRateLimited() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -165,7 +167,8 @@ struct UsageServiceTests {
     }
 
     @Test func fetchUsageSignsOutWhenRefreshFails() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -213,7 +216,8 @@ struct UsageServiceTests {
     }
 
     @Test func fetchProfileDoesNotSignOutWhenUserinfoStillReturns401AfterRefresh() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -277,7 +281,8 @@ struct UsageServiceTests {
     // MARK: - Transient vs permanent refresh failure
 
     @Test func server500DuringRefreshStaysAuthenticated() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -321,7 +326,8 @@ struct UsageServiceTests {
     }
 
     @Test func networkErrorDuringRefreshStaysAuthenticated() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "old-access",
@@ -365,7 +371,8 @@ struct UsageServiceTests {
     }
 
     @Test func expiredTokenWithTransientRefreshFailureDoesNotMakeAPICall() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "expired-access",
@@ -409,7 +416,8 @@ struct UsageServiceTests {
     }
 
     @Test func expiredTokenWithPermanentRefreshFailureSignsOut() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(
             StoredCredentials(
                 accessToken: "expired-access",
@@ -455,7 +463,8 @@ struct UsageServiceTests {
     // MARK: - End-to-end refresh recovery simulation
 
     @Test func endToEndRefreshRecoveryAcrossMultiplePolls() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         let usageURL = URL(string: "https://example.com/api/oauth/usage")!
         let tokenURL = URL(string: "https://example.com/v1/oauth/token")!
 
@@ -556,7 +565,8 @@ struct UsageServiceTests {
     }
 
     @Test func endToEnd401WithTransientFailureThenRecovery() async throws {
-        let store = try makeStore()
+        let store = makeStore()
+        defer { store.delete() }
         try store.save(StoredCredentials(
             accessToken: "access-1",
             refreshToken: "refresh-1",
@@ -638,11 +648,11 @@ struct UsageServiceTests {
         #expect(saved.refreshToken == "refresh-2")
     }
 
-    private func makeStore() throws -> StoredCredentialsStore {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return StoredCredentialsStore(directoryURL: directory)
+    private func makeStore() -> StoredCredentialsStore {
+        StoredCredentialsStore(
+            serviceName: "com.local.ClaudeUsageBar.test.\(UUID().uuidString)",
+            accountName: "test-credentials"
+        )
     }
 
     private func makeSession() -> URLSession {
