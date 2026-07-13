@@ -4,11 +4,14 @@ import ServiceManagement
 struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
+    @ObservedObject var sleepService: SleepService
 
     var body: some View {
         Form {
             Section("General") {
                 LaunchAtLoginToggle()
+
+                KeepAwakeToggle(sleepService: sleepService)
 
                 Picker("Polling Interval", selection: Binding(
                     get: { service.pollingMinutes },

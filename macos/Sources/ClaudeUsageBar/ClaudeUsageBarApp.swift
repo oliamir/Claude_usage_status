@@ -7,6 +7,7 @@ struct ClaudeUsageBarApp: App {
     @StateObject private var notificationService = NotificationService()
     @StateObject private var appUpdater = AppUpdater()
     @StateObject private var statusService = StatusService()
+    @StateObject private var sleepService = SleepService()
 
     var body: some Scene {
         MenuBarExtra {
@@ -15,12 +16,13 @@ struct ClaudeUsageBarApp: App {
                 historyService: historyService,
                 notificationService: notificationService,
                 appUpdater: appUpdater,
-                statusService: statusService
+                statusService: statusService,
+                sleepService: sleepService
             )
         } label: {
             Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d, statusIndicator: statusService.overallIndicator)
-                : renderUnauthenticatedIcon(statusIndicator: statusService.overallIndicator)
+                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d, statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
+                : renderUnauthenticatedIcon(statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
             )
                 .task {
                     // Auto-mark existing users as setup-complete
@@ -32,6 +34,7 @@ struct ClaudeUsageBarApp: App {
                     service.notificationService = notificationService
                     service.startPolling()
                     statusService.startPolling()
+                    await sleepService.start()
                 }
         }
         .menuBarExtraStyle(.window)
@@ -39,7 +42,8 @@ struct ClaudeUsageBarApp: App {
         Settings {
             SettingsWindowContent(
                 service: service,
-                notificationService: notificationService
+                notificationService: notificationService,
+                sleepService: sleepService
             )
         }
         .windowResizability(.contentSize)

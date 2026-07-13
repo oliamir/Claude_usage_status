@@ -6,6 +6,7 @@ struct PopoverView: View {
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var statusService: StatusService
+    @ObservedObject var sleepService: SleepService
     @AppStorage("setupComplete") private var setupComplete = false
 
     var body: some View {
@@ -104,6 +105,14 @@ struct PopoverView: View {
             Divider()
             StatusSectionView(statusService: statusService)
         }
+
+        Divider()
+        KeepAwakeToggle(
+            sleepService: sleepService,
+            controlSize: .small,
+            useSwitchStyle: true,
+            showsIcon: true
+        )
 
         if let error = service.lastError {
             Divider()

@@ -39,7 +39,7 @@ private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloa
     drawBarFill(barX, barY)
 }
 
-func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator = .none) -> NSImage {
+func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator = .none, sleepDisabled: Bool = false) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
@@ -57,13 +57,16 @@ func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator =
         if statusIndicator != .none {
             drawStatusDot(iconWidth: iconWidth)
         }
+        if sleepDisabled {
+            drawAwakeDot(iconWidth: iconWidth)
+        }
         return true
     }
     image.isTemplate = true
     return image
 }
 
-func renderUnauthenticatedIcon(statusIndicator: StatusIndicator = .none) -> NSImage {
+func renderUnauthenticatedIcon(statusIndicator: StatusIndicator = .none, sleepDisabled: Bool = false) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
@@ -81,6 +84,9 @@ func renderUnauthenticatedIcon(statusIndicator: StatusIndicator = .none) -> NSIm
         if statusIndicator != .none {
             drawStatusDot(iconWidth: iconWidth)
         }
+        if sleepDisabled {
+            drawAwakeDot(iconWidth: iconWidth)
+        }
         return true
     }
     image.isTemplate = true
@@ -94,6 +100,25 @@ private func drawStatusDot(iconWidth: CGFloat) {
     let dotPath = NSBezierPath(ovalIn: dotRect)
     NSColor.black.setFill()
     dotPath.fill()
+}
+
+// MARK: - Awake dot (sleep disabled)
+
+// Hollow counterpart to the status dot: filled top-right = service status,
+// hollow bottom-right = keep-awake. (The image context is flipped, so y: 1 is
+// the top edge and iconHeight - dotDiameter - 1 is the bottom edge.)
+private func drawAwakeDot(iconWidth: CGFloat) {
+    let inset: CGFloat = 0.5   // keep the 1pt stroke inside the rect
+    let dotRect = NSRect(
+        x: iconWidth - dotDiameter + inset,
+        y: iconHeight - dotDiameter - 1 + inset,
+        width: dotDiameter - 2 * inset,
+        height: dotDiameter - 2 * inset
+    )
+    let path = NSBezierPath(ovalIn: dotRect)
+    path.lineWidth = 1
+    NSColor.black.setStroke()
+    path.stroke()
 }
 
 // MARK: - Bar drawing
