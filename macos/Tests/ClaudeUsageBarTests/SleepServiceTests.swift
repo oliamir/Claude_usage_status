@@ -26,6 +26,21 @@ private final class MockCommandRunner: CommandRunning, @unchecked Sendable {
     }
 }
 
+private final class MockAssertionManager: PowerAssertionManaging, @unchecked Sendable {
+    private(set) var createdNames: [String] = []
+    private(set) var releasedIDs: [UInt32] = []
+    var nextID: UInt32 = 42
+
+    func createAssertion(named name: String) -> UInt32? {
+        createdNames.append(name)
+        return nextID
+    }
+
+    func releaseAssertion(_ id: UInt32) {
+        releasedIDs.append(id)
+    }
+}
+
 private func ok(stdout: String = "") -> CommandResult {
     CommandResult(exitCode: 0, stdout: stdout, stderr: "")
 }
@@ -52,13 +67,14 @@ Currently in use:
 @MainActor
 private func makeService(
     runner: MockCommandRunner,
-    intentFlag: Bool? = nil
+    intentFlag: Bool? = nil,
+    assertions: MockAssertionManager = MockAssertionManager()
 ) -> (SleepService, UserDefaults) {
     let defaults = UserDefaults(suiteName: "SleepServiceTests-\(UUID().uuidString)")!
     if let intentFlag {
         defaults.set(intentFlag, forKey: SleepService.intentKey)
     }
-    return (SleepService(runner: runner, defaults: defaults), defaults)
+    return (SleepService(runner: runner, defaults: defaults, assertions: assertions), defaults)
 }
 
 // MARK: - Pure functions
@@ -278,6 +294,64 @@ private func makeService(
         NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
 
         #expect(runner.invocations.isEmpty)
+    }
+
+    // MARK: Idle-sleep assertion lifecycle
+
+    @Test func assertionHeldWhileSleepDisabled() async {
+        let runner = MockCommandRunner()
+        runner.scriptedResults = [ok(), ok(stdout: pmsetOutputDisabled)]
+        let mock = MockAssertionManager()
+        let (service, _) = makeService(runner: runner, assertions: mock)
+
+        await service.setSleepDisabled(true)
+
+        #expect(service.isSleepDisabled == true)
+        #expect(mock.createdNames == ["Claude Usage Bar — Keep Mac Awake"])
+        #expect(mock.releasedIDs.isEmpty)
+    }
+
+    @Test func assertionReleasedWhenSleepReenabled() async {
+        let runner = MockCommandRunner()
+        runner.scriptedResults = [
+            ok(), ok(stdout: pmsetOutputDisabled),   // toggle on
+            ok(), ok(stdout: pmsetOutputEnabled),    // toggle off
+        ]
+        let mock = MockAssertionManager()
+        let (service, _) = makeService(runner: runner, assertions: mock)
+
+        await service.setSleepDisabled(true)
+        await service.setSleepDisabled(false)
+
+        #expect(mock.createdNames.count == 1)
+        #expect(mock.releasedIDs == [42])
+    }
+
+    @Test func assertionHeldForExternallyDetectedDisable() async {
+        // The zsh toggle-sleep function sets pmset outside the app — the app
+        // should still hold the idle-sleep assertion while it observes ON.
+        let runner = MockCommandRunner()
+        runner.scriptedResults = [ok(stdout: pmsetOutputDisabled)]
+        let mock = MockAssertionManager()
+        let (service, _) = makeService(runner: runner, assertions: mock)
+
+        await service.refreshState()
+
+        #expect(service.isSleepDisabled == true)
+        #expect(mock.createdNames.count == 1)
+    }
+
+    @Test func noDuplicateAssertionOnRepeatedRefresh() async {
+        let runner = MockCommandRunner()
+        runner.scriptedResults = [ok(stdout: pmsetOutputDisabled), ok(stdout: pmsetOutputDisabled)]
+        let mock = MockAssertionManager()
+        let (service, _) = makeService(runner: runner, assertions: mock)
+
+        await service.refreshState()
+        await service.refreshState()
+
+        #expect(mock.createdNames.count == 1)
+        #expect(mock.releasedIDs.isEmpty)
     }
 
     // MARK: Setup install

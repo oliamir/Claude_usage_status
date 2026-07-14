@@ -46,14 +46,25 @@ func makeInstallScript(username: String) -> String {
 // NOTE: this feature requires the app to be un-sandboxed (Process spawning).
 @MainActor
 final class SleepService: ObservableObject {
-    @Published private(set) var isSleepDisabled = false
+    // Belt and suspenders: pmset disablesleep covers lid-close sleep; an IOPM
+    // idle-sleep assertion (held while keep-awake is observed ON, from any
+    // source) covers idle sleep even if a macOS update stops honoring the
+    // pmset flag for it. The assertion dies with the process, so it never
+    // outlives the quit fail-safe.
+    @Published private(set) var isSleepDisabled = false {
+        didSet { updateAssertion() }
+    }
     @Published private(set) var setupStatus: SleepSetupStatus = .unknown
     @Published private(set) var isBusy = false
     @Published private(set) var lastError: String?
 
     private let runner: CommandRunning
     private let defaults: UserDefaults
+    private let assertions: PowerAssertionManaging
+    private var assertionID: UInt32?
     private var terminationObserver: Any?
+
+    private static let assertionName = "Claude Usage Bar — Keep Mac Awake"
 
     static let intentKey = "sleepDisabledByApp"   // true == THIS app turned sleep off
     static let sudoersFilePath = "/etc/sudoers.d/claude-usage-bar-sleep"   // no dots in filename or sudo ignores it
@@ -61,9 +72,14 @@ final class SleepService: ObservableObject {
     private static let pmsetPath = "/usr/bin/pmset"
     private static let osascriptPath = "/usr/bin/osascript"
 
-    init(runner: CommandRunning = ProcessCommandRunner(), defaults: UserDefaults = .standard) {
+    init(
+        runner: CommandRunning = ProcessCommandRunner(),
+        defaults: UserDefaults = .standard,
+        assertions: PowerAssertionManaging = IOPMPowerAssertionManager()
+    ) {
         self.runner = runner
         self.defaults = defaults
+        self.assertions = assertions
         terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: .main
@@ -178,6 +194,18 @@ final class SleepService: ObservableObject {
         } catch {
             setupStatus = .notInstalled
             lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Idle-sleep assertion
+
+    private func updateAssertion() {
+        if isSleepDisabled {
+            guard assertionID == nil else { return }
+            assertionID = assertions.createAssertion(named: Self.assertionName)
+        } else if let id = assertionID {
+            assertions.releaseAssertion(id)
+            assertionID = nil
         }
     }
 
