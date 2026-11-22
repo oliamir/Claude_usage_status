@@ -128,6 +128,9 @@ build_app_bundle() {
     local token_deck_app="$token_deck_dir/dist/mac-arm64/Token Deck.app"
     if [[ ! -d "$token_deck_app" && -f "$token_deck_dir/package.json" ]]; then
         echo "==> Building embedded Token Deck.app..."
+        if [[ ! -d "$token_deck_dir/node_modules" ]]; then
+            (cd "$token_deck_dir" && npm ci)
+        fi
         (cd "$token_deck_dir" && npm run build && npx electron-builder --mac dir --arm64 -c.mac.identity=null)
     fi
     if [[ -d "$token_deck_app" ]]; then

@@ -12,6 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: token-deck/package-lock.json
+
+      - name: Install & test Token Deck
+        run: cd token-deck && npm ci && npx tsc --noEmit && npm test
+
       - name: Build release binary
         run: cd macos && swift build -c release
 
