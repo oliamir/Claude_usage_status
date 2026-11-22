@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 @MainActor
 final class StatusService: ObservableObject {
@@ -17,6 +18,7 @@ final class StatusService: ObservableObject {
 
     private let session: URLSession
     private var timer: Timer?
+    private var wakeObserver: Any?
     nonisolated private static let endpoint = URL(string: "https://status.claude.com/api/v2/summary.json")!
     private static let pollingInterval: TimeInterval = 300 // 5 minutes
 
@@ -26,11 +28,30 @@ final class StatusService: ObservableObject {
         self.session = session
     }
 
+    deinit {
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+    }
+
     // MARK: - Polling
 
     func startPolling() {
         Task { await fetchStatus() }
         scheduleTimer()
+        if wakeObserver == nil {
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.scheduleTimer()
+                    Task { await self.fetchStatus() }
+                }
+            }
+        }
     }
 
     private func scheduleTimer() {
@@ -48,6 +69,10 @@ final class StatusService: ObservableObject {
     func stopPolling() {
         timer?.invalidate()
         timer = nil
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            wakeObserver = nil
+        }
     }
 
     // MARK: - Fetch

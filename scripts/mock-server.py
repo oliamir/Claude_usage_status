@@ -6,10 +6,10 @@ Usage:
     python3 scripts/mock-server.py [--port 8080] [--scenario normal]
 
 Scenarios:
-    normal          - Moderate usage (5h: 25%, 7d: 45%)
-    high            - Near rate limit (5h: 85%, 7d: 92%)
-    maxed           - Fully rate limited (5h: 100%, 7d: 100%)
-    low             - Barely used (5h: 2%, 7d: 5%)
+    normal          - Moderate usage (7d: 45%, Fable: 25%)
+    high            - Near rate limit (7d: 92%, Fable: 85%)
+    maxed           - Fully rate limited (7d: 100%, Fable: 100%)
+    low             - Barely used (7d: 5%, Fable: 2%)
     extra           - Extra usage enabled with credits
     extra_high      - Extra usage near limit
     per_model       - Per-model breakdown (Opus + Sonnet)
@@ -40,8 +40,8 @@ def iso_future(hours=0, days=0):
 
 SCENARIOS = {
     "normal": {
-        "five_hour": {"utilization": 25.0, "resets_at": iso_future(hours=3)},
         "seven_day": {"utilization": 45.0, "resets_at": iso_future(days=4)},
+        "seven_day_fable": {"utilization": 25.0, "resets_at": iso_future(days=4)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -55,8 +55,8 @@ SCENARIOS = {
         },
     },
     "high": {
-        "five_hour": {"utilization": 85.0, "resets_at": iso_future(hours=1)},
         "seven_day": {"utilization": 92.0, "resets_at": iso_future(days=2)},
+        "seven_day_fable": {"utilization": 85.0, "resets_at": iso_future(days=2)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -70,8 +70,8 @@ SCENARIOS = {
         },
     },
     "maxed": {
-        "five_hour": {"utilization": 100.0, "resets_at": iso_future(hours=4)},
         "seven_day": {"utilization": 100.0, "resets_at": iso_future(days=6)},
+        "seven_day_fable": {"utilization": 100.0, "resets_at": iso_future(days=6)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -85,8 +85,8 @@ SCENARIOS = {
         },
     },
     "low": {
-        "five_hour": {"utilization": 2.0, "resets_at": iso_future(hours=4)},
         "seven_day": {"utilization": 5.0, "resets_at": iso_future(days=6)},
+        "seven_day_fable": {"utilization": 2.0, "resets_at": iso_future(days=6)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -100,8 +100,8 @@ SCENARIOS = {
         },
     },
     "extra": {
-        "five_hour": {"utilization": 40.0, "resets_at": iso_future(hours=2)},
         "seven_day": {"utilization": 60.0, "resets_at": iso_future(days=3)},
+        "seven_day_fable": {"utilization": 40.0, "resets_at": iso_future(days=3)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -115,8 +115,8 @@ SCENARIOS = {
         },
     },
     "extra_high": {
-        "five_hour": {"utilization": 95.0, "resets_at": iso_future(hours=1)},
         "seven_day": {"utilization": 98.0, "resets_at": iso_future(days=1)},
+        "seven_day_fable": {"utilization": 95.0, "resets_at": iso_future(days=1)},
         "seven_day_opus": None,
         "seven_day_sonnet": None,
         "seven_day_oauth_apps": None,
@@ -130,8 +130,8 @@ SCENARIOS = {
         },
     },
     "per_model": {
-        "five_hour": {"utilization": 35.0, "resets_at": iso_future(hours=3)},
         "seven_day": {"utilization": 55.0, "resets_at": iso_future(days=4)},
+        "seven_day_fable": {"utilization": 35.0, "resets_at": iso_future(days=4)},
         "seven_day_opus": {"utilization": 70.0, "resets_at": iso_future(days=5)},
         "seven_day_sonnet": {"utilization": 15.0, "resets_at": iso_future(days=5)},
         "seven_day_oauth_apps": None,
@@ -145,8 +145,8 @@ SCENARIOS = {
         },
     },
     "all_features": {
-        "five_hour": {"utilization": 62.0, "resets_at": iso_future(hours=2)},
         "seven_day": {"utilization": 78.0, "resets_at": iso_future(days=3)},
+        "seven_day_fable": {"utilization": 62.0, "resets_at": iso_future(days=3)},
         "seven_day_opus": {"utilization": 88.0, "resets_at": iso_future(days=4)},
         "seven_day_sonnet": {"utilization": 25.0, "resets_at": iso_future(days=4)},
         "seven_day_oauth_apps": None,

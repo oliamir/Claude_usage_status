@@ -5,6 +5,7 @@ struct SettingsWindowContent: View {
     @ObservedObject var service: UsageService
     @ObservedObject var notificationService: NotificationService
     @ObservedObject var sleepService: SleepService
+    var tokenDeckService: TokenDeckService? = nil
 
     var body: some View {
         Form {
@@ -24,16 +25,20 @@ struct SettingsWindowContent: View {
                 }
             }
 
+            if let tokenDeckService {
+                TokenDeckSettingsSection(tokenDeck: tokenDeckService)
+            }
+
             Section("Notifications") {
-                ThresholdSlider(
-                    label: "5-hour window",
-                    value: notificationService.threshold5h,
-                    onChange: { notificationService.setThreshold5h($0) }
-                )
                 ThresholdSlider(
                     label: "7-day window",
                     value: notificationService.threshold7d,
                     onChange: { notificationService.setThreshold7d($0) }
+                )
+                ThresholdSlider(
+                    label: "Fable usage",
+                    value: notificationService.thresholdFable,
+                    onChange: { notificationService.setThresholdFable($0) }
                 )
                 ThresholdSlider(
                     label: "Extra usage",
@@ -198,6 +203,58 @@ private struct ThresholdSlider: View {
         }
         .alignmentGuide(.firstTextBaseline) { d in
             d[VerticalAlignment.center]
+        }
+    }
+}
+
+private struct TokenDeckSettingsSection: View {
+    @ObservedObject var tokenDeck: TokenDeckService
+
+    var body: some View {
+        Section("Token Deck (AKP03E / Stream Dock N3)") {
+            Toggle("Enable Token Deck Hardware Driver", isOn: $tokenDeck.isEnabled)
+            Toggle("Show Deck Simulator in Menu Bar Popover", isOn: $tokenDeck.showSimulatorInPopover)
+                .disabled(!tokenDeck.isEnabled)
+
+            LabeledContent("Deck Status") {
+                Text(tokenDeck.deviceMessage)
+                    .foregroundStyle(.secondary)
+            }
+
+            LabeledContent {
+                Slider(
+                    value: Binding(
+                        get: { Double(tokenDeck.brightness) },
+                        set: { tokenDeck.updateBrightness(Int($0)) }
+                    ),
+                    in: 0...100,
+                    step: 5
+                )
+                .disabled(!tokenDeck.isEnabled)
+            } label: {
+                Text("Deck Brightness")
+                Text("\(tokenDeck.brightness)%")
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button(tokenDeck.claudeHooksInstalled ? "Disconnect Claude Code Hooks" : "Connect Claude Code Hooks") {
+                    tokenDeck.toggleClaudeHooks()
+                }
+                .disabled(!tokenDeck.isEnabled)
+
+                Spacer()
+
+                Button("Clear Device Background") {
+                    tokenDeck.clearDeviceBackground()
+                }
+                .disabled(!tokenDeck.isEnabled || tokenDeck.devicePhase == "burning")
+
+                Button("Open Token Deck Console…") {
+                    tokenDeck.openConsoleWindow()
+                }
+                .disabled(!tokenDeck.isEnabled)
+            }
         }
     }
 }

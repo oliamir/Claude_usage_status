@@ -15,8 +15,10 @@ class UsageService: ObservableObject {
 
     var historyService: UsageHistoryService?
     var notificationService: NotificationService?
+    var tokenDeckService: TokenDeckService?
 
     private var timer: Timer?
+    private var wakeObserver: Any?
     private let session: URLSession
     private let usageEndpoint: URL
     private let userinfoEndpoint: URL
@@ -71,11 +73,11 @@ class UsageService: ObservableObject {
     private var codeVerifier: String?
     private var oauthState: String?
 
-    var pct5h: Double { (usage?.fiveHour?.utilization ?? 0) / 100.0 }
     var pct7d: Double { (usage?.sevenDay?.utilization ?? 0) / 100.0 }
+    var pctFable: Double { (usage?.fable?.utilization ?? 0) / 100.0 }
     var pctExtra: Double { (usage?.extraUsage?.utilization ?? 0) / 100.0 }
-    var reset5h: Date? { usage?.fiveHour?.resetsAtDate }
     var reset7d: Date? { usage?.sevenDay?.resetsAtDate }
+    var resetFable: Date? { usage?.fable?.resetsAtDate }
 
     init(
         session: URLSession = .shared,
@@ -98,6 +100,23 @@ class UsageService: ObservableObject {
         self.pollingMinutes = minutes
         self.currentInterval = TimeInterval(minutes * 60)
         isAuthenticated = loadCredentials() != nil
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isAuthenticated else { return }
+                self.scheduleTimer()
+                Task { await self.fetchUsage() }
+            }
+        }
+    }
+
+    deinit {
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
     }
 
     // MARK: - Polling
@@ -288,8 +307,9 @@ class UsageService: ObservableObject {
             usage = reconciled
             lastError = nil
             lastUpdated = Date()
-            historyService?.recordDataPoint(pct5h: pct5h, pct7d: pct7d)
-            notificationService?.checkAndNotify(pct5h: pct5h, pct7d: pct7d, pctExtra: pctExtra)
+            historyService?.recordDataPoint(pct7d: pct7d, pctFable: pctFable)
+            notificationService?.checkAndNotify(pct7d: pct7d, pctFable: pctFable, pctExtra: pctExtra)
+            tokenDeckService?.syncUsage(reconciled)
             if currentInterval != baseInterval {
                 currentInterval = baseInterval
                 scheduleTimer()

@@ -5,3 +5,6 @@
 *.app/
 .DS_Store
 xcuserdata/
+node_modules/
+token-deck/out/
+token-deck/dist/

@@ -3,8 +3,8 @@ import Charts
 
 struct UsageChartView: View {
     @ObservedObject var historyService: UsageHistoryService
-    @State private var selectedRange: TimeRange = .day1
-    @State private var hoverDate: Date?
+    @ViewState private var selectedRange: TimeRange = .day7
+    @ViewState private var hoverDate: Date? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -39,18 +39,18 @@ struct UsageChartView: View {
             ForEach(points) { point in
                 LineMark(
                     x: .value("Time", point.timestamp),
-                    y: .value("Usage", point.pct5h * 100)
+                    y: .value("Usage", point.pct7d * 100)
                 )
-                .foregroundStyle(by: .value("Window", "5h"))
+                .foregroundStyle(by: .value("Window", "7d"))
                 .interpolationMethod(.catmullRom)
             }
 
             ForEach(points) { point in
                 LineMark(
                     x: .value("Time", point.timestamp),
-                    y: .value("Usage", point.pct7d * 100)
+                    y: .value("Usage", point.pctFable * 100)
                 )
-                .foregroundStyle(by: .value("Window", "7d"))
+                .foregroundStyle(by: .value("Window", "Fable"))
                 .interpolationMethod(.catmullRom)
             }
 
@@ -61,16 +61,16 @@ struct UsageChartView: View {
 
                 PointMark(
                     x: .value("Time", iv.date),
-                    y: .value("Usage", iv.pct5h * 100)
+                    y: .value("Usage", iv.pct7d * 100)
                 )
-                .foregroundStyle(.blue)
+                .foregroundStyle(.orange)
                 .symbolSize(24)
 
                 PointMark(
                     x: .value("Time", iv.date),
-                    y: .value("Usage", iv.pct7d * 100)
+                    y: .value("Usage", iv.pctFable * 100)
                 )
-                .foregroundStyle(.orange)
+                .foregroundStyle(.blue)
                 .symbolSize(24)
             }
         }
@@ -95,8 +95,8 @@ struct UsageChartView: View {
             }
         }
         .chartForegroundStyleScale([
-            "5h": Color.blue,
-            "7d": Color.orange
+            "7d": Color.orange,
+            "Fable": Color.blue
         ])
         .chartLegend(.visible)
         .chartPlotStyle { plot in
@@ -123,7 +123,7 @@ struct UsageChartView: View {
         }
         .overlay(alignment: .top) {
             if let iv = interpolated {
-                tooltipView(date: iv.date, pct5h: iv.pct5h, pct7d: iv.pct7d)
+                tooltipView(date: iv.date, pct7d: iv.pct7d, pctFable: iv.pctFable)
             }
         }
         .frame(height: 120)
@@ -131,18 +131,18 @@ struct UsageChartView: View {
     }
 
     @ViewBuilder
-    private func tooltipView(date: Date, pct5h: Double, pct7d: Double) -> some View {
+    private func tooltipView(date: Date, pct7d: Double, pctFable: Double) -> some View {
         VStack(spacing: 2) {
             Text(date, format: tooltipDateFormat)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Label("\(Int(round(pct5h * 100)))%", systemImage: "circle.fill")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.blue)
                 Label("\(Int(round(pct7d * 100)))%", systemImage: "circle.fill")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.orange)
+                Label("\(Int(round(pctFable * 100)))%", systemImage: "circle.fill")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.blue)
             }
         }
         .padding(.horizontal, 6)
@@ -154,24 +154,22 @@ struct UsageChartView: View {
 
     private var xAxisFormat: Date.FormatStyle {
         switch selectedRange {
-        case .hour1:
-            return .dateTime.hour().minute()
         case .hour6, .day1:
             return .dateTime.hour()
         case .day7:
             return .dateTime.weekday(.abbreviated)
-        case .day30:
+        case .day14, .day30:
             return .dateTime.day().month(.abbreviated)
         }
     }
 
     private var tooltipDateFormat: Date.FormatStyle {
         switch selectedRange {
-        case .hour1, .hour6, .day1:
+        case .hour6, .day1:
             return .dateTime.hour().minute()
         case .day7:
             return .dateTime.weekday(.abbreviated).hour().minute()
-        case .day30:
+        case .day14, .day30:
             return .dateTime.month(.abbreviated).day().hour()
         }
     }
@@ -179,8 +177,8 @@ struct UsageChartView: View {
 
 struct UsageChartInterpolatedValues {
     let date: Date
-    let pct5h: Double
     let pct7d: Double
+    let pctFable: Double
 }
 
 enum UsageChartInterpolation {
@@ -201,7 +199,7 @@ enum UsageChartInterpolation {
         let sorted = points.sorted { $0.timestamp < $1.timestamp }
 
         if date < sorted.first!.timestamp || date > sorted.last!.timestamp {
-            return UsageChartInterpolatedValues(date: date, pct5h: 0, pct7d: 0)
+            return UsageChartInterpolatedValues(date: date, pct7d: 0, pctFable: 0)
         }
 
         for i in 0..<(sorted.count - 1) {
@@ -212,19 +210,19 @@ enum UsageChartInterpolation {
                 let i0 = max(0, i - 1)
                 let i3 = min(sorted.count - 1, i + 2)
 
-                let pct5h = catmullRom(
-                    sorted[i0].pct5h, sorted[i].pct5h,
-                    sorted[i + 1].pct5h, sorted[i3].pct5h, t: t
-                )
                 let pct7d = catmullRom(
                     sorted[i0].pct7d, sorted[i].pct7d,
                     sorted[i + 1].pct7d, sorted[i3].pct7d, t: t
                 )
+                let pctFable = catmullRom(
+                    sorted[i0].pctFable, sorted[i].pctFable,
+                    sorted[i + 1].pctFable, sorted[i3].pctFable, t: t
+                )
 
                 return UsageChartInterpolatedValues(
                     date: date,
-                    pct5h: clampToUnitInterval(pct5h),
-                    pct7d: clampToUnitInterval(pct7d)
+                    pct7d: clampToUnitInterval(pct7d),
+                    pctFable: clampToUnitInterval(pctFable)
                 )
             }
         }

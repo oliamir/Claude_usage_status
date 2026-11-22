@@ -7,6 +7,7 @@ struct PopoverView: View {
     @ObservedObject var appUpdater: AppUpdater
     @ObservedObject var statusService: StatusService
     @ObservedObject var sleepService: SleepService
+    var tokenDeckService: TokenDeckService? = nil
     @AppStorage("setupComplete") private var setupComplete = false
 
     var body: some View {
@@ -58,6 +59,11 @@ struct PopoverView: View {
             StatusSectionView(statusService: statusService)
         }
 
+        if let tokenDeckService {
+            Divider()
+            TokenDeckSectionView(tokenDeck: tokenDeckService)
+        }
+
         Divider()
         HStack {
             settingsButton
@@ -72,24 +78,23 @@ struct PopoverView: View {
     @ViewBuilder
     private var usageView: some View {
         UsageBucketRow(
-            label: "5-Hour Window",
-            bucket: service.usage?.fiveHour
-        )
-
-        UsageBucketRow(
             label: "7-Day Window",
             bucket: service.usage?.sevenDay
         )
 
-        if let opus = service.usage?.sevenDayOpus,
-           opus.utilization != nil {
+        UsageBucketRow(
+            label: "Fable Usage",
+            bucket: service.usage?.fable
+        )
+
+        if let modelBuckets = service.usage?.activeModelBuckets,
+           !modelBuckets.isEmpty {
             Divider()
             Text("Per-Model (7 day)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            UsageBucketRow(label: "Opus", bucket: opus)
-            if let sonnet = service.usage?.sevenDaySonnet {
-                UsageBucketRow(label: "Sonnet", bucket: sonnet)
+            ForEach(modelBuckets, id: \.label) { item in
+                UsageBucketRow(label: item.label, bucket: item.bucket)
             }
         }
 
@@ -113,6 +118,11 @@ struct PopoverView: View {
             useSwitchStyle: true,
             showsIcon: true
         )
+
+        if let tokenDeckService {
+            Divider()
+            TokenDeckSectionView(tokenDeck: tokenDeckService)
+        }
 
         if let error = service.lastError {
             Divider()
@@ -197,14 +207,14 @@ private struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             SetupThresholdSlider(
-                label: "5-hour window",
-                value: notificationService.threshold5h,
-                onChange: { notificationService.setThreshold5h($0) }
-            )
-            SetupThresholdSlider(
                 label: "7-day window",
                 value: notificationService.threshold7d,
                 onChange: { notificationService.setThreshold7d($0) }
+            )
+            SetupThresholdSlider(
+                label: "Fable usage",
+                value: notificationService.thresholdFable,
+                onChange: { notificationService.setThresholdFable($0) }
             )
             SetupThresholdSlider(
                 label: "Extra usage",
@@ -261,7 +271,7 @@ private struct SetupView: View {
 
 private struct CodeEntryView: View {
     @ObservedObject var service: UsageService
-    @State private var code = ""
+    @ViewState private var code = ""
 
     var body: some View {
         Text("Paste the code from your browser:")
@@ -307,20 +317,55 @@ private struct UsageBucketRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
+            HStack(spacing: 6) {
                 Text(label)
                     .font(.subheadline)
+                if bucket?.isActive == true {
+                    Text("Active limit")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.15), in: Capsule())
+                }
                 Spacer()
+                if let dollars = bucket?.formattedDollarSummary {
+                    Text(dollars)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
                 Text(percentageText)
                     .font(.subheadline)
                     .monospacedDigit()
             }
-            ProgressView(value: (bucket?.utilization ?? 0) / 100.0, total: 1.0)
+            ProgressView(value: min(max((bucket?.utilization ?? 0) / 100.0, 0), 1.0), total: 1.0)
                 .tint(colorForPct((bucket?.utilization ?? 0) / 100.0))
+                .overlay {
+                    if let elapsed = bucket?.elapsedFraction() {
+                        GeometryReader { geo in
+                            let x = min(max(geo.size.width * elapsed, 1), max(geo.size.width - 1, 1))
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.65))
+                                .frame(width: 1.5, height: geo.size.height + 4)
+                                .position(x: x, y: geo.size.height / 2)
+                                .help("7-day time elapsed (\(Int(round(elapsed * 100)))%)")
+                        }
+                    }
+                }
             if let resetDate = bucket?.resetsAtDate {
-                Text("Resets \(resetDate, style: .relative)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text("Resets \(resetDate, style: .relative)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let pace = paceInfo {
+                        Text(pace.text)
+                            .font(.caption2)
+                            .foregroundStyle(pace.color)
+                            .monospacedDigit()
+                    }
+                }
             }
         }
     }
@@ -328,6 +373,20 @@ private struct UsageBucketRow: View {
     private var percentageText: String {
         guard let pct = bucket?.utilization else { return "—" }
         return "\(Int(round(pct)))%"
+    }
+
+    private var paceInfo: (text: String, color: Color)? {
+        guard let delta = bucket?.paceDelta() else { return nil }
+        let deltaPct = Int(round(delta * 100))
+        if deltaPct >= 15 {
+            return ("+\(deltaPct)% over pace", .red)
+        } else if deltaPct >= 6 {
+            return ("+\(deltaPct)% over pace", .orange)
+        } else if deltaPct <= -6 {
+            return ("\(abs(deltaPct))% under pace", .secondary)
+        } else {
+            return ("On pace", .secondary)
+        }
     }
 }
 

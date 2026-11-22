@@ -67,7 +67,7 @@ final class SleepService: ObservableObject {
     private static let assertionName = "Claude Usage Bar — Keep Mac Awake"
 
     static let intentKey = "sleepDisabledByApp"   // true == THIS app turned sleep off
-    static let sudoersFilePath = "/etc/sudoers.d/claude-usage-bar-sleep"   // no dots in filename or sudo ignores it
+    nonisolated static let sudoersFilePath = "/etc/sudoers.d/claude-usage-bar-sleep"   // no dots in filename or sudo ignores it
     private static let sudoPath = "/usr/bin/sudo"
     private static let pmsetPath = "/usr/bin/pmset"
     private static let osascriptPath = "/usr/bin/osascript"

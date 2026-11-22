@@ -24,7 +24,7 @@ private let cachedLabels: [String: CachedLabel] = {
     let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .medium)
     let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
     var result = [String: CachedLabel]()
-    for label in ["5h", "7d"] {
+    for label in ["7d", "Fb"] {
         let str = NSAttributedString(string: label, attributes: attrs)
         result[label] = CachedLabel(string: str, size: str.size())
     }
@@ -39,7 +39,7 @@ private func drawRow(label: String, barX: CGFloat, barY: CGFloat, labelX: CGFloa
     drawBarFill(barX, barY)
 }
 
-func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator = .none, sleepDisabled: Bool = false) -> NSImage {
+func renderIcon(pct7d: Double, pctFable: Double, statusIndicator: StatusIndicator = .none, sleepDisabled: Bool = false) -> NSImage {
     let image = NSImage(size: NSSize(width: iconWidth, height: iconHeight), flipped: true) { _ in
         let offset = logoSize + logoGap
         let barX = offset + labelWidth + labelGap
@@ -48,11 +48,11 @@ func renderIcon(pct5h: Double, pct7d: Double, statusIndicator: StatusIndicator =
 
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
-            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct5h)
-        }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
+        drawRow(label: "7d", barX: barX, barY: topY, labelX: offset) { x, y in
             drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pct7d)
+        }
+        drawRow(label: "Fb", barX: barX, barY: bottomY, labelX: offset) { x, y in
+            drawBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius, pct: pctFable)
         }
         if statusIndicator != .none {
             drawStatusDot(iconWidth: iconWidth)
@@ -75,10 +75,10 @@ func renderUnauthenticatedIcon(statusIndicator: StatusIndicator = .none, sleepDi
 
         drawClaudeLogo(x: 0, y: (iconHeight - logoSize) / 2, size: logoSize)
 
-        drawRow(label: "5h", barX: barX, barY: topY, labelX: offset) { x, y in
+        drawRow(label: "7d", barX: barX, barY: topY, labelX: offset) { x, y in
             drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         }
-        drawRow(label: "7d", barX: barX, barY: bottomY, labelX: offset) { x, y in
+        drawRow(label: "Fb", barX: barX, barY: bottomY, labelX: offset) { x, y in
             drawDashedBar(x: x, y: y, width: barWidth, height: barHeight, cornerRadius: cornerRadius)
         }
         if statusIndicator != .none {

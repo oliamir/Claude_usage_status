@@ -9,29 +9,29 @@ struct ThresholdAlert: Equatable {
 
 /// Pure logic: returns which threshold alerts should fire given a state transition.
 func crossedThresholds(
-    threshold5h: Int,
     threshold7d: Int,
+    thresholdFable: Int,
     thresholdExtra: Int,
-    previous5h: Double,
     previous7d: Double,
+    previousFable: Double,
     previousExtra: Double,
-    current5h: Double,
     current7d: Double,
+    currentFable: Double,
     currentExtra: Double
 ) -> [ThresholdAlert] {
     var alerts = [ThresholdAlert]()
-
-    if threshold5h > 0 {
-        let t = Double(threshold5h)
-        if current5h >= t && previous5h < t {
-            alerts.append(ThresholdAlert(window: "5-hour", pct: Int(round(current5h))))
-        }
-    }
 
     if threshold7d > 0 {
         let t = Double(threshold7d)
         if current7d >= t && previous7d < t {
             alerts.append(ThresholdAlert(window: "7-day", pct: Int(round(current7d))))
+        }
+    }
+
+    if thresholdFable > 0 {
+        let t = Double(thresholdFable)
+        if currentFable >= t && previousFable < t {
+            alerts.append(ThresholdAlert(window: "Fable", pct: Int(round(currentFable))))
         }
     }
 
@@ -59,29 +59,22 @@ private class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
 class NotificationService: ObservableObject {
     private nonisolated static let logger = Logger(subsystem: "com.local.ClaudeUsageBar", category: "Notifications")
     /// 0 = off, 5–100 = alert when window reaches this %.
-    @Published private(set) var threshold5h: Int
     @Published private(set) var threshold7d: Int
+    @Published private(set) var thresholdFable: Int
     @Published private(set) var thresholdExtra: Int
 
-    private var previousPct5h: Double?
     private var previousPct7d: Double?
+    private var previousPctFable: Double?
     private var previousPctExtra: Double?
     private let delegate = NotificationDelegate()
 
     init() {
-        threshold5h = Self.load("notificationThreshold5h")
         threshold7d = Self.load("notificationThreshold7d")
+        thresholdFable = Self.load("notificationThresholdFable")
         thresholdExtra = Self.load("notificationThresholdExtra")
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = delegate
         }
-    }
-
-    func setThreshold5h(_ value: Int) {
-        threshold5h = clamp(value)
-        UserDefaults.standard.set(threshold5h, forKey: "notificationThreshold5h")
-        previousPct5h = nil
-        if threshold5h > 0 { requestPermission() }
     }
 
     func setThreshold7d(_ value: Int) {
@@ -89,6 +82,13 @@ class NotificationService: ObservableObject {
         UserDefaults.standard.set(threshold7d, forKey: "notificationThreshold7d")
         previousPct7d = nil
         if threshold7d > 0 { requestPermission() }
+    }
+
+    func setThresholdFable(_ value: Int) {
+        thresholdFable = clamp(value)
+        UserDefaults.standard.set(thresholdFable, forKey: "notificationThresholdFable")
+        previousPctFable = nil
+        if thresholdFable > 0 { requestPermission() }
     }
 
     func setThresholdExtra(_ value: Int) {
@@ -103,30 +103,30 @@ class NotificationService: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func checkAndNotify(pct5h: Double, pct7d: Double, pctExtra: Double) {
-        let current5h = pct5h * 100
+    func checkAndNotify(pct7d: Double, pctFable: Double, pctExtra: Double) {
         let current7d = pct7d * 100
+        let currentFable = pctFable * 100
         let currentExtra = pctExtra * 100
 
-        let prev5h = previousPct5h ?? 0
         let prev7d = previousPct7d ?? 0
+        let prevFable = previousPctFable ?? 0
         let prevExtra = previousPctExtra ?? 0
 
         defer {
-            previousPct5h = current5h
             previousPct7d = current7d
+            previousPctFable = currentFable
             previousPctExtra = currentExtra
         }
 
         let alerts = crossedThresholds(
-            threshold5h: threshold5h,
             threshold7d: threshold7d,
+            thresholdFable: thresholdFable,
             thresholdExtra: thresholdExtra,
-            previous5h: prev5h,
             previous7d: prev7d,
+            previousFable: prevFable,
             previousExtra: prevExtra,
-            current5h: current5h,
             current7d: current7d,
+            currentFable: currentFable,
             currentExtra: currentExtra
         )
 

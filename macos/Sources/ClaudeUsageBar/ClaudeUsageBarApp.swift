@@ -8,6 +8,7 @@ struct ClaudeUsageBarApp: App {
     @StateObject private var appUpdater = AppUpdater()
     @StateObject private var statusService = StatusService()
     @StateObject private var sleepService = SleepService()
+    @StateObject private var tokenDeckService = TokenDeckService()
 
     var body: some Scene {
         MenuBarExtra {
@@ -17,11 +18,13 @@ struct ClaudeUsageBarApp: App {
                 notificationService: notificationService,
                 appUpdater: appUpdater,
                 statusService: statusService,
-                sleepService: sleepService
+                sleepService: sleepService,
+                tokenDeckService: tokenDeckService
             )
         } label: {
+            let _ = tokenDeckService.isRunning
             Image(nsImage: service.isAuthenticated
-                ? renderIcon(pct5h: service.pct5h, pct7d: service.pct7d, statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
+                ? renderIcon(pct7d: service.pct7d, pctFable: service.pctFable, statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
                 : renderUnauthenticatedIcon(statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
             )
                 .task {
@@ -32,6 +35,8 @@ struct ClaudeUsageBarApp: App {
                     historyService.loadHistory()
                     service.historyService = historyService
                     service.notificationService = notificationService
+                    service.tokenDeckService = tokenDeckService
+                    tokenDeckService.start()
                     service.startPolling()
                     statusService.startPolling()
                     await sleepService.start()
@@ -43,7 +48,8 @@ struct ClaudeUsageBarApp: App {
             SettingsWindowContent(
                 service: service,
                 notificationService: notificationService,
-                sleepService: sleepService
+                sleepService: sleepService,
+                tokenDeckService: tokenDeckService
             )
         }
         .windowResizability(.contentSize)

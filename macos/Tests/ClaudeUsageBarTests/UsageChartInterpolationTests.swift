@@ -7,10 +7,10 @@ struct UsageChartInterpolationTests {
     @Test func interpolateValuesClampsNegativeOvershootAfterReset() {
         let base = Date(timeIntervalSince1970: 0)
         let points = [
-            UsageDataPoint(timestamp: base, pct5h: 0.3, pct7d: 0.3),
-            UsageDataPoint(timestamp: base.addingTimeInterval(1), pct5h: 0.7, pct7d: 0.7),
-            UsageDataPoint(timestamp: base.addingTimeInterval(2), pct5h: 0.0, pct7d: 0.0),
-            UsageDataPoint(timestamp: base.addingTimeInterval(3), pct5h: 1.0, pct7d: 1.0),
+            UsageDataPoint(timestamp: base, pct7d: 0.3, pctFable: 0.3),
+            UsageDataPoint(timestamp: base.addingTimeInterval(1), pct7d: 0.7, pctFable: 0.7),
+            UsageDataPoint(timestamp: base.addingTimeInterval(2), pct7d: 0.0, pctFable: 0.0),
+            UsageDataPoint(timestamp: base.addingTimeInterval(3), pct7d: 1.0, pctFable: 1.0),
         ]
 
         #expect(
@@ -22,17 +22,17 @@ struct UsageChartInterpolationTests {
             in: points
         )
 
-        #expect(interpolated?.pct5h == 0)
         #expect(interpolated?.pct7d == 0)
+        #expect(interpolated?.pctFable == 0)
     }
 
     @Test func interpolateValuesClampsPositiveOvershootToHundredPercent() {
         let base = Date(timeIntervalSince1970: 0)
         let points = [
-            UsageDataPoint(timestamp: base, pct5h: 0.0, pct7d: 0.0),
-            UsageDataPoint(timestamp: base.addingTimeInterval(1), pct5h: 0.5, pct7d: 0.5),
-            UsageDataPoint(timestamp: base.addingTimeInterval(2), pct5h: 1.0, pct7d: 1.0),
-            UsageDataPoint(timestamp: base.addingTimeInterval(3), pct5h: 0.0, pct7d: 0.0),
+            UsageDataPoint(timestamp: base, pct7d: 0.0, pctFable: 0.0),
+            UsageDataPoint(timestamp: base.addingTimeInterval(1), pct7d: 0.5, pctFable: 0.5),
+            UsageDataPoint(timestamp: base.addingTimeInterval(2), pct7d: 1.0, pctFable: 1.0),
+            UsageDataPoint(timestamp: base.addingTimeInterval(3), pct7d: 0.0, pctFable: 0.0),
         ]
 
         #expect(
@@ -44,7 +44,7 @@ struct UsageChartInterpolationTests {
             in: points
         )
 
-        #expect(interpolated?.pct5h == 1)
         #expect(interpolated?.pct7d == 1)
+        #expect(interpolated?.pctFable == 1)
     }
 }

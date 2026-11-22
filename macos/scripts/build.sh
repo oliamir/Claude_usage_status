@@ -103,13 +103,18 @@ build_app_bundle() {
     echo "==> Bundling SwiftPM resources..."
     ditto "$resource_bundle" "$APP_BUNDLE/Contents/Resources/$(basename "$resource_bundle")"
 
-    echo "==> Compiling Asset Catalog..."
-    actool --compile "$APP_BUNDLE/Contents/Resources" \
-           --platform macosx \
-           --minimum-deployment-target 14.0 \
-           --app-icon AppIcon \
-           --output-partial-info-plist /dev/null \
-           "$PROJECT_DIR/Resources/Assets.xcassets" > /dev/null
+    if xcrun --find actool >/dev/null 2>&1; then
+        echo "==> Compiling Asset Catalog..."
+        actool --compile "$APP_BUNDLE/Contents/Resources" \
+               --platform macosx \
+               --minimum-deployment-target 14.0 \
+               --app-icon AppIcon \
+               --output-partial-info-plist /dev/null \
+               "$PROJECT_DIR/Resources/Assets.xcassets" > /dev/null
+    elif [[ -f "$APP_ICON_SOURCE" ]]; then
+        echo "==> Copying prebuilt AppIcon.icns (actool not available)..."
+        cp "$APP_ICON_SOURCE" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    fi
 
     local sparkle_framework
     sparkle_framework="$(find "$BUILD_DIR" -path '*/Sparkle.framework' -type d | head -n 1 || true)"
@@ -119,7 +124,19 @@ build_app_bundle() {
         ditto "$sparkle_framework" "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
     fi
 
-    echo "==> Codesigning (ad-hoc)..."
+    local token_deck_dir="$PROJECT_DIR/../token-deck"
+    local token_deck_app="$token_deck_dir/dist/mac-arm64/Token Deck.app"
+    if [[ ! -d "$token_deck_app" && -f "$token_deck_dir/package.json" ]]; then
+        echo "==> Building embedded Token Deck.app..."
+        (cd "$token_deck_dir" && npm run build && npx electron-builder --mac dir --arm64 -c.mac.identity=null)
+    fi
+    if [[ -d "$token_deck_app" ]]; then
+        echo "==> Bundling embedded Token Deck.app..."
+        mkdir -p "$APP_BUNDLE/Contents/Helpers"
+        ditto "$token_deck_app" "$APP_BUNDLE/Contents/Helpers/Token Deck.app"
+    fi
+
+    echo "==> Codesigning (inside-out ad-hoc)..."
     if [[ -d "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework" ]]; then
         while IFS= read -r nested_bundle; do
             codesign --force --sign - "$nested_bundle"
@@ -127,11 +144,30 @@ build_app_bundle() {
             \( -name '*.app' -o -name '*.xpc' \) -type d | sort)
         codesign --force --sign - "$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
     fi
+    if [[ -d "$APP_BUNDLE/Contents/Helpers/Token Deck.app" ]]; then
+        local td_app="$APP_BUNDLE/Contents/Helpers/Token Deck.app"
+        # 1. Sign nested Mach-O libraries, helper executables, and macOS .node addons
+        while IFS= read -r bin; do
+            if file "$bin" | grep -q "Mach-O"; then
+                codesign --force --sign - "$bin"
+            fi
+        done < <(find "$td_app/Contents" -type f \( -name '*.dylib' -o -name '*.node' -o -name 'chrome_crashpad_handler' -o -name 'ShipIt' \) | sort)
+        # 2. Sign nested frameworks
+        while IFS= read -r fw; do
+            codesign --force --sign - "$fw"
+        done < <(find "$td_app/Contents/Frameworks" -maxdepth 1 -name '*.framework' -type d | sort)
+        # 3. Sign nested Electron Helper apps
+        while IFS= read -r helper; do
+            codesign --force --sign - "$helper"
+        done < <(find "$td_app/Contents/Frameworks" -maxdepth 1 -name '*.app' -type d | sort)
+        # 4. Sign Token Deck.app itself
+        codesign --force --sign - "$td_app"
+    fi
     codesign --force --sign - "$APP_BUNDLE"
 
     echo "==> Built $APP_BUNDLE"
-    codesign -v "$APP_BUNDLE"
-    echo "==> Codesign verified OK"
+    codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+    echo "==> Deep strict codesign verified OK"
 }
 
 create_zip() {

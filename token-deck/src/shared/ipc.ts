@@ -1,0 +1,111 @@
+import type { AgentId, DeckMode } from './model'
+import type { KnobMap } from '../main/deck/protocol'
+import type { CustomMode, CustomTile } from '../main/modes/custom'
+import type { MetalBindings } from '../main/settings/store'
+
+export type DeviceSnapshot = {
+  phase: string
+  message: string
+  manufacturer: string
+  product: string
+  serial: string
+  release: string
+  firmware: string
+  burnFailed: boolean
+}
+
+export type AgentSnapshot = {
+  id: AgentId
+  installed: boolean
+  signedIn: boolean
+  hooks: boolean
+  statusLine: boolean
+  reachable: boolean
+  detail: string
+}
+
+export type ModeFile = { name: string; file: string; errors: string[] }
+
+export type BurnRow = { serial: string; imageHash: string; at: string }
+
+export type UsageAllowance = {
+  agent: string
+  fiveHour: number | null
+  sevenDay: number | null
+  fiveLabel: string
+  sevenLabel: string
+  fiveResets: number | null
+  sevenResets: number | null
+  known: boolean
+}
+
+export type Snapshot = {
+  version: string
+  device: DeviceSnapshot
+  mode: DeckMode
+  activePage: string
+  metalBindings: MetalBindings
+  customModes: CustomMode[]
+  installedApps: string[]
+  brightness: number
+  keepalive: boolean
+  autoBurn: boolean
+  startAtLogin: boolean
+  agents: AgentSnapshot[]
+  favorites: { 'claude-code': string[]; codex: string[]; opencode: string[] }
+  efforts: { 'claude-code': string[]; codex: string[]; opencode: string[] }
+  modes: ModeFile[]
+  example: string
+  burned: BurnRow[]
+  preburned: boolean
+  burnMessage: string
+  welcomePng: string
+  tiles: string[]
+  wizard: { step: number; open: boolean; notes: string[] } | null
+  knobsCalibrated: boolean
+  accessibility: boolean
+  lastAction: { ok: boolean; message: string; at: number } | null
+  updateVersion: string | null
+  log: string
+  modelNamesUpper: boolean
+  allowance: UsageAllowance
+  usageOpen: boolean
+}
+
+export type IpcCall =
+  | { method: 'snapshot' }
+  | { method: 'brightness'; value: number }
+  | { method: 'keepalive'; value: boolean }
+  | { method: 'autoBurn'; value: boolean }
+  | { method: 'login'; value: boolean }
+  | { method: 'testPattern' }
+  | { method: 'connect'; id: AgentId }
+  | { method: 'disconnect'; id: AgentId }
+  | { method: 'restore'; id: AgentId }
+  | { method: 'favorites'; agent: 'claude-code' | 'codex' | 'opencode'; models: string[] }
+  | { method: 'reloadModes' }
+  | { method: 'openModes' }
+  | { method: 'saveMode'; id: string; name: string; tiles: CustomTile[]; knobs: CustomMode['knobs'] }
+  | { method: 'createMode'; name: string }
+  | { method: 'deleteMode'; id: string }
+  | { method: 'selectPage'; target: string }
+  | { method: 'setMetalBindings'; bindings: MetalBindings }
+  | { method: 'pickIconFile' }
+  | { method: 'appIcons' }
+  | { method: 'testTile'; key: number }
+  | { method: 'burn' }
+  | { method: 'exportWelcome' }
+  | { method: 'checkUpdates' }
+  | { method: 'updateNow' }
+  | { method: 'showLog' }
+  | { method: 'usageClose' }
+  | { method: 'wizard'; step: number; skip?: boolean }
+  | { method: 'wizardAsk' }
+  | { method: 'requestAccessibility' }
+  | { method: 'wizardKnobs' }
+  | { method: 'simulator'; event: { type: string; key?: number; which?: string; action?: string; pressed?: boolean } }
+  | { method: 'modeExample' }
+
+export type SimulatorEvent = { type: 'key'; key: number } | { type: 'metal'; which: 'left' | 'middle' | 'right'; pressed: boolean } | { type: 'knob'; which: 'main' | 'left' | 'right'; action: 'cw' | 'ccw' | 'click' }
+
+export type { KnobMap }

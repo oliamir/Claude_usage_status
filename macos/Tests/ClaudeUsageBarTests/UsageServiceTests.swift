@@ -69,7 +69,7 @@ struct UsageServiceTests {
                     statusCode: 200,
                     body: """
                     {
-                      "five_hour": { "utilization": 12, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day_fable": { "utilization": 12, "resets_at": "2026-03-08T18:00:00Z" },
                       "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
                     }
                     """
@@ -93,7 +93,7 @@ struct UsageServiceTests {
 
         #expect(service.isAuthenticated)
         #expect(service.lastError == nil)
-        #expect(service.usage?.fiveHour?.utilization == 12)
+        #expect(service.usage?.fable?.utilization == 12)
         #expect(requests.count == 3)
 
         let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
@@ -497,7 +497,7 @@ struct UsageServiceTests {
                     statusCode: 200,
                     body: """
                     {
-                      "five_hour": { "utilization": \(phase * 10), "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day_fable": { "utilization": \(phase * 10), "resets_at": "2026-03-08T18:00:00Z" },
                       "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
                     }
                     """
@@ -530,7 +530,7 @@ struct UsageServiceTests {
 
         #expect(service.isAuthenticated, "Poll 1: must stay authenticated")
         #expect(service.lastError == nil, "Poll 1: usage succeeded so no error")
-        #expect(service.usage?.fiveHour?.utilization == 10, "Poll 1: usage should update")
+        #expect(service.usage?.fable?.utilization == 10, "Poll 1: usage should update")
         #expect(usageRequestTokens.count == 1, "Poll 1: exactly one API call")
         #expect(usageRequestTokens.last == "Bearer access-1")
 
@@ -546,7 +546,7 @@ struct UsageServiceTests {
 
         #expect(service.isAuthenticated, "Poll 2: must NOT sign out on transient failure")
         #expect(service.lastError == "Token refresh failed — will retry")
-        #expect(service.usage?.fiveHour?.utilization == 10, "Poll 2: usage unchanged")
+        #expect(service.usage?.fable?.utilization == 10, "Poll 2: usage unchanged")
         #expect(usageRequestTokens.count == 1, "Poll 2: no new API call (token expired)")
 
         // -- Poll 3: refresh server recovers --
@@ -555,7 +555,7 @@ struct UsageServiceTests {
 
         #expect(service.isAuthenticated, "Poll 3: authenticated after recovery")
         #expect(service.lastError == nil, "Poll 3: error cleared")
-        #expect(service.usage?.fiveHour?.utilization == 30, "Poll 3: usage updated")
+        #expect(service.usage?.fable?.utilization == 30, "Poll 3: usage updated")
         #expect(usageRequestTokens.count == 2, "Poll 3: one new API call")
         #expect(usageRequestTokens.last == "Bearer access-refreshed")
 
@@ -608,7 +608,7 @@ struct UsageServiceTests {
                     statusCode: 200,
                     body: """
                     {
-                      "five_hour": { "utilization": 42, "resets_at": "2026-03-08T18:00:00Z" },
+                      "seven_day_fable": { "utilization": 42, "resets_at": "2026-03-08T18:00:00Z" },
                       "seven_day": { "utilization": 20, "resets_at": "2026-03-15T18:00:00Z" }
                     }
                     """
@@ -641,7 +641,7 @@ struct UsageServiceTests {
 
         #expect(service.isAuthenticated, "Authenticated after recovery")
         #expect(service.lastError == nil, "Error cleared")
-        #expect(service.usage?.fiveHour?.utilization == 42)
+        #expect(service.usage?.fable?.utilization == 42)
 
         let saved = try #require(store.load(defaultScopes: UsageService.defaultOAuthScopes))
         #expect(saved.accessToken == "access-2")

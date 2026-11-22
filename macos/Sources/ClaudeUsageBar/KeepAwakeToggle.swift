@@ -9,7 +9,7 @@ struct KeepAwakeToggle: View {
     private let useSwitchStyle: Bool
     private let showsIcon: Bool
 
-    @State private var pendingValue: Bool?
+    @ViewState private var pendingValue: Bool? = nil
 
     init(
         sleepService: SleepService,
