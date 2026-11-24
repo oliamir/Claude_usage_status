@@ -215,6 +215,8 @@ type BridgeResponse = {
   code?: string
   error?: string
   accessibility?: boolean
+  volume?: number
+  muted?: boolean
 }
 
 let cachedBridgeAccessibility: boolean | null = null
@@ -246,7 +248,9 @@ async function nativeBridgeCall(
       status: res.status,
       code: typeof json.code === 'string' ? json.code : undefined,
       error: typeof json.error === 'string' ? json.error : undefined,
-      accessibility: typeof json.accessibility === 'boolean' ? json.accessibility : undefined
+      accessibility: typeof json.accessibility === 'boolean' ? json.accessibility : undefined,
+      volume: typeof json.volume === 'number' ? json.volume : undefined,
+      muted: typeof json.muted === 'boolean' ? json.muted : undefined
     }
   } catch {
     return null
@@ -464,13 +468,17 @@ export async function launchInTerminal(command: string): Promise<void> {
 }
 
 let cachedVol: { volume: number; muted: boolean } = { volume: 75, muted: false }
-let lastKnobTurnAt = 0
+let volSyncedOnce = false
 let volWriteInFlight = false
 let pendingVolWrite: { volume: number; muted: boolean } | null = null
 
-function readMacVolume(): Promise<{ volume: number; muted: boolean } | null> {
+async function readMacVolume(): Promise<{ volume: number; muted: boolean } | null> {
+  if (process.platform !== 'darwin') return { volume: 50, muted: false }
+  const bridge = await nativeBridgeCall('GET', '/volume')
+  if (bridge?.ok && typeof bridge.volume === 'number') {
+    return { volume: Math.max(0, Math.min(100, Math.round(bridge.volume))), muted: Boolean(bridge.muted) }
+  }
   return new Promise((resolve) => {
-    if (process.platform !== 'darwin') return resolve({ volume: 50, muted: false })
     execFile('/usr/bin/osascript', ['-e', 'get volume settings'], { timeout: 3000 }, (err, stdout) => {
       if (err) return resolve(null)
       const text = String(stdout || '')
@@ -482,22 +490,6 @@ function readMacVolume(): Promise<{ volume: number; muted: boolean } | null> {
       resolve({ volume, muted })
     })
   })
-}
-
-async function syncVolumeFromMac(): Promise<void> {
-  if (volWriteInFlight || pendingVolWrite || Date.now() - lastKnobTurnAt < 3500) return
-  const snapAtStart = lastKnobTurnAt
-  const current = await readMacVolume()
-  if (!current) return
-  if (volWriteInFlight || pendingVolWrite || lastKnobTurnAt !== snapAtStart || Date.now() - lastKnobTurnAt < 3500) {
-    return
-  }
-  cachedVol = current
-}
-
-if (process.platform === 'darwin') {
-  void syncVolumeFromMac()
-  setInterval(() => void syncVolumeFromMac(), 3000).unref()
 }
 
 function flushMacVolume(): void {
@@ -521,6 +513,7 @@ let hudWindow: import('electron').BrowserWindow | null = null
 let hudReady = false
 let hudPending: { pct: number; label: string; color: string } | null = null
 let hudHideTimer: NodeJS.Timeout | null = null
+let hudDestroyTimer: NodeJS.Timeout | null = null
 
 const HUD_HTML = `<!doctype html><html><body style="margin:0;padding:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,sans-serif;user-select:none;overflow:hidden;">
   <div style="box-sizing:border-box;width:220px;height:64px;border-radius:16px;background:rgba(19,21,18,0.94);border:1px solid rgba(255,255,255,0.16);padding:12px 16px;display:flex;flex-direction:column;justify-content:space-between;color:#fff;">
@@ -604,16 +597,41 @@ function showMacVolumeHud(volume: number, muted: boolean): void {
     }
 
     if (hudHideTimer) clearTimeout(hudHideTimer)
+    if (hudDestroyTimer) clearTimeout(hudDestroyTimer)
     hudHideTimer = setTimeout(() => {
       if (hudWindow && !hudWindow.isDestroyed()) hudWindow.hide()
+      hudDestroyTimer = setTimeout(() => {
+        if (hudWindow && !hudWindow.isDestroyed()) {
+          hudWindow.destroy()
+        }
+        hudWindow = null
+        hudReady = false
+        hudPending = null
+      }, 15_000)
     }, 1200)
   } catch {
     /* non-electron test environment */
   }
 }
 
-export function adjustVolume(action: 'cw' | 'ccw' | 'click'): { volume: number; muted: boolean } {
-  lastKnobTurnAt = Date.now()
+export async function adjustVolume(action: 'cw' | 'ccw' | 'click'): Promise<{ volume: number; muted: boolean }> {
+  // Fast path: native CoreAudio inside ClaudeUsageBar (<1ms, zero subprocess spawns, always live-synced).
+  if (process.platform === 'darwin') {
+    const bridge = await nativeBridgeCall('POST', '/volume', { action })
+    if (bridge?.ok && typeof bridge.volume === 'number') {
+      const volume = Math.max(0, Math.min(100, Math.round(bridge.volume)))
+      const muted = Boolean(bridge.muted)
+      cachedVol = { volume, muted }
+      volSyncedOnce = true
+      showMacVolumeHud(volume, muted)
+      return { volume, muted }
+    }
+    if (!volSyncedOnce) {
+      const current = await readMacVolume()
+      if (current) cachedVol = current
+      volSyncedOnce = true
+    }
+  }
   let { volume, muted } = cachedVol
   if (action === 'click') {
     muted = !muted
@@ -833,7 +851,7 @@ export async function runSystemAction(
 ): Promise<{ overlay?: string[]; ms?: number }> {
   if (action === 'vol-up' || action === 'vol-down' || action === 'vol-mute') {
     const dir = action === 'vol-up' ? 'cw' : action === 'vol-down' ? 'ccw' : 'click'
-    const { volume, muted } = adjustVolume(dir)
+    const { volume, muted } = await adjustVolume(dir)
     return {
       overlay: muted ? ['VOL=ICON', 'VOL=MUTE', 'VOL=0'] : ['VOL=ICON', `VOL=${volume}%`, `VOL=${volume}`],
       ms: 1500

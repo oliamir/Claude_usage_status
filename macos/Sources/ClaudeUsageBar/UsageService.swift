@@ -138,6 +138,7 @@ class UsageService: ObservableObject {
                 Task { await self.fetchUsage() }
             }
         }
+        t.tolerance = min(60, currentInterval * 0.15)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }

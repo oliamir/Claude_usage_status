@@ -62,6 +62,7 @@ final class StatusService: ObservableObject {
                 Task { await self.fetchStatus() }
             }
         }
+        t.tolerance = 30
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }

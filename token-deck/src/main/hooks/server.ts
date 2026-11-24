@@ -13,7 +13,7 @@ export type HookBody = {
 export class HookServer {
   private server: http.Server | null = null
   url = ''
-  onStateRequest: (() => unknown) | null = null
+  onStateRequest: ((opts: { lite: boolean }) => unknown) | null = null
   onCommandRequest: ((body: unknown) => Promise<unknown>) | null = null
 
   constructor(
@@ -41,7 +41,8 @@ export class HookServer {
       const route = url.pathname.slice(prefix.length)
       if (req.method === 'GET' && route === '/state' && this.onStateRequest) {
         try {
-          const payload = JSON.stringify(this.onStateRequest())
+          const lite = url.searchParams.get('lite') === '1'
+          const payload = JSON.stringify(this.onStateRequest({ lite }))
           res.writeHead(200, { 'content-type': 'application/json' })
           res.end(payload)
         } catch (err) {

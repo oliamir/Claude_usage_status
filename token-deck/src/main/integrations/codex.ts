@@ -21,6 +21,7 @@ export class CodexIntegration {
   models: Array<{ id: string; name: string; efforts: string[]; defaultEffort?: string; isDefault?: boolean }> = []
   private child: ChildProcessWithoutNullStreams | null = null
   private limitsTimer: NodeJS.Timeout | null = null
+  private lastLimitsSig = ''
   private nextId = 1
   private pending = new Map<number, (msg: Rpc) => void>()
   onChange: () => void = () => {}
@@ -62,7 +63,18 @@ export class CodexIntegration {
     await this.request('initialize', { clientInfo: { name: 'token-deck', version: '1.0.0' } })
     this.notify('initialized', {})
     await this.refresh()
-    if (!this.limitsTimer) this.limitsTimer = setInterval(() => void this.readLimitsOnly(), 60_000)
+    if (!this.limitsTimer) this.limitsTimer = setInterval(() => void this.readLimitsOnly(), 120_000)
+  }
+
+  pause(): void {
+    if (this.limitsTimer) clearInterval(this.limitsTimer)
+    this.limitsTimer = null
+  }
+
+  resume(): void {
+    if (this.child && !this.limitsTimer) {
+      this.limitsTimer = setInterval(() => void this.readLimitsOnly(), 120_000)
+    }
   }
 
   stop(): void {
@@ -74,8 +86,8 @@ export class CodexIntegration {
 
   private async readLimitsOnly(): Promise<void> {
     try {
-      this.readLimits(await this.request('account/rateLimits/read', {}))
-      this.onChange()
+      const changed = this.readLimits(await this.request('account/rateLimits/read', {}))
+      if (changed) this.onChange()
     } catch (err) {
       this.log(`codex limits ${err}`)
     }
@@ -233,11 +245,14 @@ export class CodexIntegration {
     this.store.set('favorites', { ...favorites, codex: names })
   }
 
-  private readLimits(payload: unknown): void {
+  private readLimits(payload: unknown): boolean {
     const limits = (payload as { rateLimits?: { primary?: Limit; secondary?: Limit } })?.rateLimits || (payload as { primary?: Limit; secondary?: Limit })
-    if (!limits) return
+    if (!limits) return false
     const five = asWindow(limits.primary)
     const seven = asWindow(limits.secondary)
+    const sig = `${five?.pct ?? ''}:${five?.resetsAt ?? ''}|${seven?.pct ?? ''}:${seven?.resetsAt ?? ''}`
+    if (sig === this.lastLimitsSig) return false
+    this.lastLimitsSig = sig
     this.store.set('usage', {
       ...this.store.get('usage'),
       codex: {
@@ -247,6 +262,7 @@ export class CodexIntegration {
         labels: { five: labelFor(limits.primary?.windowDurationMins), seven: labelFor(limits.secondary?.windowDurationMins) }
       }
     })
+    return true
   }
 
   async setModel(model: string): Promise<void> {

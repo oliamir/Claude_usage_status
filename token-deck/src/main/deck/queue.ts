@@ -18,8 +18,8 @@ export class FrameQueue {
     tiles: Map<number, Buffer>
     force: boolean
     started: boolean
-    promise: Promise<void>
-    resolve: () => void
+    promise: Promise<boolean>
+    resolve: (sent: boolean) => void
     reject: (e: unknown) => void
   } | null = null
 
@@ -48,16 +48,16 @@ export class FrameQueue {
     return this.command(heartbeat())
   }
 
-  /** Changed tiles plus one STP. `force` resends even when the bytes match. */
-  paint(tiles: Map<number, Buffer>, force = false): Promise<void> {
+  /** Changed tiles plus one STP. `force` resends even when the bytes match. Returns true if anything was written. */
+  paint(tiles: Map<number, Buffer>, force = false): Promise<boolean> {
     if (this.pending && !this.pending.started) {
       for (const [key, jpeg] of tiles) this.pending.tiles.set(key, jpeg)
       if (force) this.pending.force = true
       return this.pending.promise
     }
-    let resolve!: () => void
+    let resolve!: (sent: boolean) => void
     let reject!: (e: unknown) => void
-    const promise = new Promise<void>((res, rej) => {
+    const promise = new Promise<boolean>((res, rej) => {
       resolve = res
       reject = rej
     })
@@ -74,8 +74,8 @@ export class FrameQueue {
       job.started = true
       if (this.pending === job) this.pending = null
       try {
-        await this.writePaint(job.tiles, job.force)
-        job.resolve()
+        const sent = await this.writePaint(job.tiles, job.force)
+        job.resolve(sent)
       } catch (err) {
         job.reject(err)
         throw err
@@ -85,12 +85,12 @@ export class FrameQueue {
   }
 
   /** Key 1 again, even when unchanged, then STP. */
-  keepalive(jpeg: Buffer | null): Promise<void> {
-    if (!jpeg) return Promise.resolve()
+  keepalive(jpeg: Buffer | null): Promise<boolean> {
+    if (!jpeg) return Promise.resolve(false)
     return this.paint(new Map([[1, jpeg]]), true)
   }
 
-  private async writePaint(tiles: Map<number, Buffer>, force: boolean): Promise<void> {
+  private async writePaint(tiles: Map<number, Buffer>, force: boolean): Promise<boolean> {
     let sent = false
     const keys = [...tiles.keys()].sort((a, b) => a - b)
     for (const key of keys) {
@@ -103,6 +103,7 @@ export class FrameQueue {
       sent = true
     }
     if (sent) await this.write(withReportId(refresh()))
+    return sent
   }
 
   private async writeTile(key: number, jpeg: Buffer): Promise<void> {

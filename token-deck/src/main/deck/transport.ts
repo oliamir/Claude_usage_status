@@ -101,6 +101,7 @@ export class DeckTransport {
   private burnedThisAppearance = false
   private reconnecting = false
   private closed = false
+  private paused = false
   private burnInFlight: Promise<void> | null = null
   brightness = 70
   keepalive = true
@@ -123,33 +124,82 @@ export class DeckTransport {
 
   start(): void {
     this.closed = false
-    this.heart = setInterval(() => {
-      if (!this.handle || this.burnFailed) {
-        if (this.handle && this.burnFailed && this.phase !== 'burning') void this.queue.heartbeat()
-        return
-      }
-      if (process.platform === 'win32' && vendorRunning()) {
-        this.log('vendor app appeared')
-        this.message = MESSAGES.vendor
-        this.phase = 'vendor'
-        void this.dropHandle()
-        this.emit()
-        return
-      }
-      void this.queue.heartbeat().catch((err) => this.onWriteError(err))
-    }, 10000)
-    this.keep = setInterval(() => {
-      if (!this.keepalive || !this.handle || this.burnFailed || this.phase !== 'ready') return
-      const jpeg = this.tiles.get(1)
-      if (!jpeg) return
-      void this.queue.keepalive(jpeg).catch((err) => this.onWriteError(err))
-    }, 1000)
-    this.poll = setInterval(() => void this.pollOnce(), 2000)
+    this.paused = false
+    this.startPollTimer()
     void this.pollOnce()
   }
 
+  pause(): void {
+    this.paused = true
+    this.stopPollTimer()
+    this.stopConnectedTimers()
+  }
+
+  resume(): void {
+    if (this.closed) return
+    this.paused = false
+    if (this.handle) {
+      this.startConnectedTimers()
+    } else {
+      this.startPollTimer()
+      void this.pollOnce()
+    }
+  }
+
+  private startPollTimer(): void {
+    if (this.poll || this.closed || this.paused || this.handle) return
+    this.poll = setInterval(() => void this.pollOnce(), 5000)
+  }
+
+  private stopPollTimer(): void {
+    if (!this.poll) return
+    clearInterval(this.poll)
+    this.poll = null
+  }
+
+  private startConnectedTimers(): void {
+    if (this.closed || this.paused || !this.handle) return
+    if (!this.heart) {
+      this.heart = setInterval(() => {
+        if (!this.handle || this.paused) return
+        if (this.burnFailed) {
+          if (this.phase !== 'burning') void this.queue.heartbeat()
+          return
+        }
+        if (process.platform === 'win32' && vendorRunning()) {
+          this.log('vendor app appeared')
+          this.message = MESSAGES.vendor
+          this.phase = 'vendor'
+          void this.dropHandle()
+          this.emit()
+          return
+        }
+        void this.queue.heartbeat().catch((err) => this.onWriteError(err))
+      }, 20000)
+    }
+    if (!this.keep) {
+      this.keep = setInterval(() => {
+        if (!this.keepalive || !this.handle || this.paused || this.burnFailed || this.phase !== 'ready') return
+        const jpeg = this.tiles.get(1)
+        if (!jpeg) return
+        void this.queue.keepalive(jpeg).catch((err) => this.onWriteError(err))
+      }, 30000)
+    }
+  }
+
+  private stopConnectedTimers(): void {
+    if (this.heart) {
+      clearInterval(this.heart)
+      this.heart = null
+    }
+    if (this.keep) {
+      clearInterval(this.keep)
+      this.keep = null
+    }
+  }
+
   async pollOnce(): Promise<void> {
-    if (this.closed || this.handle || this.opening || this.phase === 'burning' || this.phase === 'closing') return
+    if (this.closed || this.paused || this.handle || this.opening || this.phase === 'burning' || this.phase === 'closing') return
     let list: Device[] = []
     try {
       list = await devicesAsync()
@@ -165,10 +215,11 @@ export class DeckTransport {
       this.burnedThisAppearance = false
       this.burnFailed = false
       if (this.phase !== 'vendor') {
+        const changed = this.phase !== 'idle' || this.message !== MESSAGES.missing || this.info !== null
         this.phase = 'idle'
         this.message = MESSAGES.missing
         this.info = null
-        this.emit()
+        if (changed) this.emit()
       }
       return
     }
@@ -204,6 +255,8 @@ export class DeckTransport {
     try {
       const handle = this.nonExclusive ? await HIDAsync.open(device.path, { nonExclusive: true }) : await HIDAsync.open(device.path)
       this.handle = handle
+      this.stopPollTimer()
+      this.startConnectedTimers()
       this.failStreak = 0
       this.queue.clearLastSent()
       handle.on('error', (err) => {
@@ -333,22 +386,29 @@ export class DeckTransport {
   private abandon(): void {
     const handle = this.handle
     this.handle = null
+    this.stopConnectedTimers()
     this.log('abandoned wedged handle')
     if (handle) {
       void handle.close().catch(() => undefined)
     }
+    this.startPollTimer()
   }
 
   private async dropHandle(): Promise<void> {
     const handle = this.handle
     this.handle = null
-    if (!handle) return
+    this.stopConnectedTimers()
+    if (!handle) {
+      this.startPollTimer()
+      return
+    }
     this.phase = 'closing'
     try {
       await handle.close()
     } catch (err) {
       this.log(`close ${err}`)
     }
+    this.startPollTimer()
   }
 
   async reconnect(): Promise<void> {
@@ -360,6 +420,10 @@ export class DeckTransport {
       this.queue.clearLastSent()
       this.phase = 'idle'
       this.emit()
+      if (!this.paused && !this.closed) {
+        this.startPollTimer()
+        void this.pollOnce()
+      }
     } finally {
       this.reconnecting = false
     }
@@ -384,9 +448,11 @@ export class DeckTransport {
       if (jpeg) map.set(index + 1, jpeg)
     })
     const started = Date.now()
-    await this.queue.paint(map, force)
-    const bytes = [...map.values()].reduce((sum, buf) => sum + buf.length, 0)
-    this.log(`paint ${bytes}B ${Date.now() - started}ms keys ${[...map.keys()].join(',')}`)
+    const wrote = await this.queue.paint(map, force)
+    if (wrote) {
+      const bytes = [...map.values()].reduce((sum, buf) => sum + buf.length, 0)
+      this.log(`paint ${bytes}B ${Date.now() - started}ms keys ${[...map.keys()].join(',')}`)
+    }
   }
 
   async replay(): Promise<void> {
@@ -499,15 +565,18 @@ export class DeckTransport {
 
   async prepareQuit(opts: { paint: Buffer[] | null; capMs: number }): Promise<void> {
     this.closed = true
-    if (this.poll) clearInterval(this.poll)
-    if (this.keep) clearInterval(this.keep)
+    this.stopPollTimer()
+    if (this.keep) {
+      clearInterval(this.keep)
+      this.keep = null
+    }
     if (this.burnInFlight) {
       await Promise.race([this.burnInFlight, sleep(opts.capMs)])
     }
     if (!this.burnFailed && opts.paint && this.handle && this.phase !== 'burning') {
       await Promise.race([this.paint(opts.paint, true), sleep(opts.capMs)])
     }
-    if (this.heart) clearInterval(this.heart)
+    this.stopConnectedTimers()
     await Promise.race([this.dropHandle(), sleep(Math.min(1000, opts.capMs))])
   }
 

@@ -41,6 +41,8 @@ export class Controller {
   private overlayTimer: NodeJS.Timeout | null = null
   private painting = false
   private pending = false
+  private cachedModes: CustomMode[] | null = null
+  private lastRenderKey = ''
   ultracodeOn = false
   lastAction: { ok: boolean; message: string; at: number } | null = null
 
@@ -109,12 +111,20 @@ export class Controller {
     this.custom = null
     this.store.set('mode', builtin)
     this.store.set('activePage', builtin)
+    this.claude.triggerPoll()
     if (announce) this.flash(builtin === 'models' ? ['MODELS &', 'USAGE'] : [builtin.toUpperCase()], 1000)
     else await this.render(true)
   }
 
+  invalidateModes(): void {
+    this.cachedModes = null
+  }
+
   modes(): CustomMode[] {
-    return loadModes()
+    if (!this.cachedModes) {
+      this.cachedModes = loadModes()
+    }
+    return this.cachedModes
   }
 
   sessions(): LiveSession[] {
@@ -321,7 +331,7 @@ export class Controller {
       }
     }
     if (which === 'main') {
-      const { volume, muted } = adjustVolume(action)
+      const { volume, muted } = await adjustVolume(action)
       this.flash(
         muted ? ['VOL=ICON', 'VOL=MUTE', 'VOL=0'] : ['VOL=ICON', `VOL=${volume}%`, `VOL=${volume}`],
         1500
@@ -547,6 +557,11 @@ export class Controller {
     try {
       const specs = this.specs()
       const groups = this.overlay
+      const renderKey = JSON.stringify({ specs, groups })
+      if (!force && renderKey === this.lastRenderKey) {
+        return
+      }
+      this.lastRenderKey = renderKey
       const frames = await Promise.all(
         specs.map((spec, index) => {
           if (spec.kind === 'welcome') return Promise.resolve(null)
@@ -801,6 +816,7 @@ export class Controller {
    * with a mistake (or caught halfway through a save) keeps the keys that worked and says so.
    */
   async modesChanged(): Promise<void> {
+    this.invalidateModes()
     if (this.mode === 'custom' && this.custom) {
       const fresh = this.modes().find((mode) => mode.id === this.custom!.id || mode.file === this.custom!.file)
       if (!fresh) return this.selectPage('agents', false)

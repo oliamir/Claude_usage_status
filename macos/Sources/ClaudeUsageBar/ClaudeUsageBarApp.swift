@@ -22,7 +22,6 @@ struct ClaudeUsageBarApp: App {
                 tokenDeckService: tokenDeckService
             )
         } label: {
-            let _ = tokenDeckService.isRunning
             Image(nsImage: service.isAuthenticated
                 ? renderIcon(pct7d: service.pct7d, pctFable: service.pctFable, statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)
                 : renderUnauthenticatedIcon(statusIndicator: statusService.overallIndicator, sleepDisabled: sleepService.isSleepDisabled)

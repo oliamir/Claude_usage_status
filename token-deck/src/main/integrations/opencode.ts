@@ -19,6 +19,9 @@ export class OpenCodeIntegration {
   models: string[] = []
   private password = ''
   private timer: NodeJS.Timeout | null = null
+  private running = false
+  private paused = false
+  private lastSig = ''
   onChange: () => void = () => {}
 
   constructor(private readonly store: SettingsStore) {}
@@ -36,14 +39,41 @@ export class OpenCodeIntegration {
   }
 
   start(): void {
-    if (this.timer) return
-    void this.poll()
-    this.timer = setInterval(() => void this.poll(), 2000)
+    if (this.running) return
+    this.running = true
+    this.paused = false
+    void this.poll().finally(() => this.scheduleNext())
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer)
+    this.running = false
+    this.paused = false
+    if (this.timer) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  pause(): void {
+    this.paused = true
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  resume(): void {
+    if (!this.running) return
+    this.paused = false
+    this.scheduleNext()
+  }
+
+  private scheduleNext(): void {
+    if (!this.running || this.paused) return
+    if (this.timer) clearTimeout(this.timer)
+    const delayMs = this.reachable ? 15_000 : 60_000
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.poll().finally(() => this.scheduleNext())
+    }, delayMs)
   }
 
   private async authHeader(): Promise<Record<string, string>> {
@@ -100,9 +130,18 @@ export class OpenCodeIntegration {
       }
       this.reachable = true
       await this.readModels(base)
-      this.onChange()
+      const sig = `1|${this.models.join(',')}|${[...this.sessions.values()].map((s) => `${s.id}:${s.status}:${s.title}`).join(',')}`
+      if (sig !== this.lastSig) {
+        this.lastSig = sig
+        this.onChange()
+      }
     } catch {
+      const wasReachable = this.reachable
       this.reachable = false
+      if (wasReachable) {
+        this.lastSig = ''
+        this.onChange()
+      }
     }
   }
 

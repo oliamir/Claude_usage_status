@@ -63,6 +63,10 @@ struct SettingsWindowContent: View {
         .fixedSize(horizontal: false, vertical: true)
         .onAppear {
             focusSettingsWindow()
+            tokenDeckService?.setSettingsVisible(true)
+        }
+        .onDisappear {
+            tokenDeckService?.setSettingsVisible(false)
         }
     }
 }

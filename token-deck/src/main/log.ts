@@ -8,16 +8,15 @@ export function homeDir(): string {
 
 export class Log {
   readonly file: string
-  private stream: fs.WriteStream
 
   constructor() {
     const dir = path.join(homeDir(), 'log')
     fs.mkdirSync(dir, { recursive: true })
     this.file = path.join(dir, 'tokendeck.log')
-    this.stream = this.open()
+    this.rotateIfNeeded()
   }
 
-  private open(): fs.WriteStream {
+  private rotateIfNeeded(): void {
     try {
       if (fs.existsSync(this.file) && fs.statSync(this.file).size > 5 * 1024 * 1024) {
         fs.renameSync(this.file, `${this.file}.1`)
@@ -25,28 +24,34 @@ export class Log {
     } catch {
       /* a rotation failure still leaves the current file usable */
     }
-    return fs.createWriteStream(this.file, { flags: 'a' })
   }
 
   write(line: string): void {
-    try {
-      if (fs.existsSync(this.file) && fs.statSync(this.file).size > 5 * 1024 * 1024) {
-        this.stream.end()
-        this.stream = this.open()
-      }
-    } catch {
-      /* keep the current stream */
-    }
+    this.rotateIfNeeded()
     const text = `${new Date().toISOString()} ${line}\n`
     fs.appendFileSync(this.file, text)
   }
 
   tail(max = 8000): string {
+    let fd: number | null = null
     try {
-      const text = fs.readFileSync(this.file, 'utf8')
-      return text.slice(-max)
+      fd = fs.openSync(this.file, 'r')
+      const size = fs.fstatSync(fd).size
+      if (size <= 0) return ''
+      const readLen = Math.min(size, max)
+      const buf = Buffer.allocUnsafe(readLen)
+      const bytesRead = fs.readSync(fd, buf, 0, readLen, size - readLen)
+      return buf.subarray(0, bytesRead).toString('utf8')
     } catch {
       return ''
+    } finally {
+      if (fd !== null) {
+        try {
+          fs.closeSync(fd)
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
 }

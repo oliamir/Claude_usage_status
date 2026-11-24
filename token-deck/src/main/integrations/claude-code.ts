@@ -101,6 +101,15 @@ export class ClaudeCode {
   private statuslineMtime = 0
   private timer: NodeJS.Timeout | null = null
   private watcher: chokidar.FSWatcher | null = null
+  private paused = false
+  private polling = false
+  private lastAgentsCliAt = 0
+  private lastModelPsAt = 0
+  private lastProjectsScanAt = 0
+  private cachedRecentSessions: ClaudeAgent[] = []
+  private cachedCliAgents: ClaudeAgent[] = []
+  /** Returns true when a deck view showing Claude sessions/models is visible. */
+  isActiveView: () => boolean = () => true
   onChange: () => void = () => {}
 
   constructor(private readonly store: SettingsStore, private readonly log: (line: string) => void) {}
@@ -139,17 +148,54 @@ export class ClaudeCode {
   }
 
   start(): void {
-    if (this.timer) return
+    if (this.timer || this.watcher) return
+    this.paused = false
     writeStatusline()
-    void this.poll()
-    this.timer = setInterval(() => void this.poll(), 2000)
+    void this.poll(true).finally(() => this.scheduleNextPoll())
     this.watcher = chokidar.watch(this.settingsPath(), { ignoreInitial: true }).on('change', () => this.onChange())
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer)
+    this.paused = true
+    if (this.timer) clearTimeout(this.timer)
     this.timer = null
     void this.watcher?.close()
+    this.watcher = null
+  }
+
+  pause(): void {
+    this.paused = true
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  resume(): void {
+    if (!this.watcher) return
+    this.paused = false
+    this.scheduleNextPoll()
+  }
+
+  /** Immediately refresh sessions & active model (e.g. when switching to Agents/Sessions/Models). */
+  triggerPoll(): void {
+    if (this.paused) return
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+    void this.poll(true).finally(() => this.scheduleNextPoll())
+  }
+
+  private scheduleNextPoll(): void {
+    if (this.paused || !this.watcher) return
+    if (this.timer) clearTimeout(this.timer)
+    const active = this.isActiveView() || [...this.sessions.values()].some((s) => s.status === 'working')
+    const delayMs = active ? 10_000 : 60_000
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.poll(false).finally(() => this.scheduleNextPoll())
+    }, delayMs)
   }
 
   private execJson(args: string[]): Promise<Record<string, unknown> | null> {
@@ -166,63 +212,88 @@ export class ClaudeCode {
     })
   }
 
-  private async poll(): Promise<void> {
-    await this.refreshActiveModel()
-    this.readSavedStatusline()
-    const rows = new Map<string, ClaudeAgent>()
-    for (const row of readSessionFiles()) rows.set(row.sessionId || '', row)
-    rows.delete('')
-    for (const row of recentSessionFiles()) {
-      if (row.sessionId && !rows.has(row.sessionId)) rows.set(row.sessionId, row)
-    }
-    if (this.bin) {
-      const raw = await new Promise<string>((resolve) => {
-        execFile(this.bin!, ['agents', '--json', '--all'], { timeout: 8000, encoding: 'utf8' }, (err, stdout) => {
-          resolve(err ? '' : String(stdout || ''))
+  private async poll(forceFull = false): Promise<void> {
+    if (this.polling) return
+    this.polling = true
+    try {
+      const now = Date.now()
+      const active = this.isActiveView()
+      this.readSavedStatusline()
+      const sessionFiles = readSessionFiles()
+      const rows = new Map<string, ClaudeAgent>()
+      for (const row of sessionFiles) rows.set(row.sessionId || '', row)
+      rows.delete('')
+
+      // Only spawn `ps` when viewing agent/model pages AND live sessions exist (or forced), at most every 30s.
+      if ((forceFull || active) && (sessionFiles.length > 0 || forceFull) && now - this.lastModelPsAt >= 30_000) {
+        this.lastModelPsAt = now
+        await this.refreshActiveModel(sessionFiles)
+      }
+
+      // Only walk ~/.claude/projects/ on startup, mode switch, or every 60s.
+      if (forceFull || (active && now - this.lastProjectsScanAt >= 60_000)) {
+        this.lastProjectsScanAt = now
+        this.cachedRecentSessions = recentSessionFiles()
+      }
+      for (const row of this.cachedRecentSessions) {
+        if (row.sessionId && !rows.has(row.sessionId)) rows.set(row.sessionId, row)
+      }
+
+      // Only spawn `claude agents --json --all` when actively viewing agent/session pages (at most every 30s).
+      // Live Claude Code hooks (`POST /hooks/claude`) already push real-time status changes immediately.
+      if (this.bin && (forceFull || (active && now - this.lastAgentsCliAt >= 30_000))) {
+        this.lastAgentsCliAt = now
+        const raw = await new Promise<string>((resolve) => {
+          execFile(this.bin!, ['agents', '--json', '--all'], { timeout: 8000, encoding: 'utf8' }, (err, stdout) => {
+            resolve(err ? '' : String(stdout || ''))
+          })
         })
-      })
-      const parsed = parseAgents(raw)
-      if (raw && !parsed) this.log('claude agents was not JSON')
-      for (const row of parsed || []) {
+        const parsed = parseAgents(raw)
+        if (raw && !parsed) this.log('claude agents was not JSON')
+        this.cachedCliAgents = parsed || []
+      }
+      for (const row of this.cachedCliAgents) {
         const id = row.sessionId || ''
         if (!id) continue
         rows.set(id, { ...rows.get(id), ...row, sessionId: id })
       }
+      const next = new Map<string, LiveSession>()
+      const ordered = [...rows.values()].sort((a, b) => (b.updatedAt || startedAt(b.startedAt) || 0) - (a.updatedAt || startedAt(a.startedAt) || 0))
+      for (const row of ordered) {
+        const id = row.sessionId || ''
+        if (!id || next.has(id)) continue
+        const prev = this.sessions.get(id)
+        const desktop = row.entrypoint === 'claude-desktop' || String(row.cwd || '').includes('Application Support/Claude')
+        next.set(id, {
+          id,
+          agent: 'claude-code',
+          title: (row.name || prev?.title || 'SESSION').toUpperCase(),
+          cwd: row.cwd || prev?.cwd,
+          status: mapStatus(row),
+          context: prev?.context ?? null,
+          updatedAt: startedAt(row.startedAt) || prev?.updatedAt || Date.now(),
+          pid: row.pid || prev?.pid,
+          tty: prev?.tty,
+          termProgram: prev?.termProgram,
+          entrypoint: row.entrypoint || (desktop ? 'claude-desktop' : prev?.entrypoint),
+          model: prev?.model,
+          live: pidAlive(row.pid || prev?.pid) || (prev?.live === true && !prev.ended),
+          ended: prev?.ended,
+          transcript: row.transcript || prev?.transcript
+        })
+      }
+      for (const [id, prev] of this.sessions) {
+        if (!next.has(id) && prev.tty && Date.now() - prev.updatedAt < 20000) next.set(id, prev)
+      }
+      const sig = [...next.values()].map((row) => `${row.id}:${row.status}:${row.title}`).join('|')
+      this.sessions = next
+      if (sig === this.sessionSig) return
+      this.sessionSig = sig
+      this.log(`claude sessions ${next.size}`)
+      this.onChange()
+    } finally {
+      this.polling = false
     }
-    const next = new Map<string, LiveSession>()
-    const ordered = [...rows.values()].sort((a, b) => (b.updatedAt || startedAt(b.startedAt) || 0) - (a.updatedAt || startedAt(a.startedAt) || 0))
-    for (const row of ordered) {
-      const id = row.sessionId || ''
-      if (!id || next.has(id)) continue
-      const prev = this.sessions.get(id)
-      const desktop = row.entrypoint === 'claude-desktop' || String(row.cwd || '').includes('Application Support/Claude')
-      next.set(id, {
-        id,
-        agent: 'claude-code',
-        title: (row.name || prev?.title || 'SESSION').toUpperCase(),
-        cwd: row.cwd || prev?.cwd,
-        status: mapStatus(row),
-        context: prev?.context ?? null,
-        updatedAt: startedAt(row.startedAt) || prev?.updatedAt || Date.now(),
-        pid: row.pid || prev?.pid,
-        tty: prev?.tty,
-        termProgram: prev?.termProgram,
-        entrypoint: row.entrypoint || (desktop ? 'claude-desktop' : prev?.entrypoint),
-        model: prev?.model,
-        live: pidAlive(row.pid || prev?.pid) || (prev?.live === true && !prev.ended),
-        ended: prev?.ended,
-        transcript: row.transcript || prev?.transcript
-      })
-    }
-    for (const [id, prev] of this.sessions) {
-      if (!next.has(id) && prev.tty && Date.now() - prev.updatedAt < 20000) next.set(id, prev)
-    }
-    const sig = [...next.values()].map((row) => `${row.id}:${row.status}:${row.title}`).join('|')
-    this.sessions = next
-    if (sig === this.sessionSig) return
-    this.sessionSig = sig
-    this.log(`claude sessions ${next.size}`)
-    this.onChange()
   }
 
   ingest(event: HookBody): void {
@@ -419,10 +490,10 @@ export class ClaudeCode {
     return family?.name || ''
   }
 
-  private async refreshActiveModel(): Promise<void> {
+  private async refreshActiveModel(sessionFiles?: ClaudeAgent[]): Promise<void> {
     const running = await runningClaudeModels()
     let best: { id: string; at: number } | null = null
-    for (const row of readSessionFiles()) {
+    for (const row of sessionFiles ?? readSessionFiles()) {
       const id = running.get(String(row.pid || ''))
       const at = row.updatedAt || 0
       if (id && (!best || at > best.at)) best = { id, at }

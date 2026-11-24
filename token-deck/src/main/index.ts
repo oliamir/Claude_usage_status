@@ -189,9 +189,14 @@ async function start(): Promise<void> {
     broadcast()
   }
   transport.currentTiles = () => lastTiles.filter((buf) => buf.length > 0)
-  claude.onChange = () => void controller.render(false)
-  codex.onChange = () => void controller.render(false)
-  opencode.onChange = () => void controller.render(false)
+  claude.isActiveView = () => controller.mode === 'agents' || controller.mode === 'sessions' || controller.mode === 'models'
+  const onAgentChange = () => {
+    if (controller.mode === 'custom' && !controller.overlay) return
+    void controller.render(false)
+  }
+  claude.onChange = onAgentChange
+  codex.onChange = onAgentChange
+  opencode.onChange = onAgentChange
   const hooks = new HookServer(
     store,
     (event) => {
@@ -233,7 +238,7 @@ async function start(): Promise<void> {
     },
     (line) => log.write(line)
   )
-  hooks.onStateRequest = () => snapshot()
+  hooks.onStateRequest = ({ lite }) => (lite ? snapshotLite() : snapshot())
   hooks.onCommandRequest = async (body: unknown) => {
     const cmd = (body || {}) as { method?: string; [key: string]: unknown }
     if (cmd.method === 'openWindow') {
@@ -248,7 +253,7 @@ async function start(): Promise<void> {
   await hooks.start()
   claude.start()
   if (codex.bin) void codex.start()
-  opencode.start()
+  if (opencode.bin) opencode.start()
   watchModes(() => void controller.modesChanged())
   app.setLoginItemSettings({ openAtLogin: store.get('startAtLogin') })
 
@@ -256,6 +261,35 @@ async function start(): Promise<void> {
   // The one page the settings window may show and take calls from.
   const rendererFile = path.join(__dirname, '../renderer/index.html')
   const appUrl = process.env.ELECTRON_RENDERER_URL || pathToFileURL(rendererFile).href
+  let accessibilityPollTimer: NodeJS.Timeout | null = null
+
+  function stopAccessibilityPoll(): void {
+    if (accessibilityPollTimer) {
+      clearInterval(accessibilityPollTimer)
+      accessibilityPollTimer = null
+    }
+  }
+
+  function startAccessibilityPollIfNeeded(): void {
+    stopAccessibilityPoll()
+    if (!window || window.isDestroyed()) return
+    void refreshAccessibilityStatus().then((trusted) => {
+      broadcast()
+      if (trusted || !window || window.isDestroyed()) return
+      accessibilityPollTimer = setInterval(() => {
+        if (!window || window.isDestroyed()) {
+          stopAccessibilityPoll()
+          return
+        }
+        void refreshAccessibilityStatus().then((ok) => {
+          if (ok) {
+            stopAccessibilityPoll()
+            broadcast()
+          }
+        })
+      }, 3000)
+    })
+  }
 
   function openWindow(): void {
     if (window && !window.isDestroyed()) {
@@ -263,6 +297,7 @@ async function start(): Promise<void> {
       window.moveTop()
       window.focus()
       app.focus({ steal: true })
+      startAccessibilityPollIfNeeded()
       return
     }
     window = new BrowserWindow({
@@ -280,10 +315,9 @@ async function start(): Promise<void> {
         sandbox: true
       }
     })
-    window.on('close', (event) => {
-      if (quitting) return
-      event.preventDefault()
-      window?.hide()
+    window.on('closed', () => {
+      stopAccessibilityPoll()
+      window = null
     })
     // The window holds the app's bridge, so nothing but the app's own page may load in it.
     window.webContents.setWindowOpenHandler(({ url }) => {
@@ -302,13 +336,39 @@ async function start(): Promise<void> {
       window?.moveTop()
       window?.focus()
       app.focus({ steal: true })
+      startAccessibilityPollIfNeeded()
     })
+  }
+
+  function snapshotLite(): Record<string, unknown> {
+    const device = transport.snapshot()
+    const customModes = controller.modes()
+    return {
+      version: app.getVersion(),
+      device: {
+        phase: device.phase,
+        message: device.message,
+        product: device.info?.product || '',
+        firmware: device.info?.firmware || transport.firmware,
+        burnFailed: device.burnFailed
+      },
+      mode: controller.mode,
+      activePage: controller.activePage(),
+      metalBindings: store.get('metalBindings') || { left: 'custom:my-deck', middle: 'sessions', right: 'models' },
+      customModes: customModes.map((m) => ({ id: m.id, name: m.name })),
+      brightness: store.get('brightness'),
+      agents: [
+        { id: 'claude-code', hooks: claude.hooksInstalled }
+      ],
+      accessibility: accessibilityTrusted(false)
+    }
   }
 
   function snapshot(): Snapshot {
     const device = transport.snapshot()
     const serial = device.info?.serial || ''
     const failures = serial ? store.get('burnFailures')[serial] || 0 : 0
+    const customModes = controller.modes()
     return {
       version: app.getVersion(),
       device: {
@@ -324,7 +384,7 @@ async function start(): Promise<void> {
       mode: controller.mode,
       activePage: controller.activePage(),
       metalBindings: store.get('metalBindings') || { left: 'custom:my-deck', middle: 'sessions', right: 'models' },
-      customModes: controller.modes(),
+      customModes,
       installedApps,
       brightness: store.get('brightness'),
       keepalive: store.get('repaintKeepalive'),
@@ -340,7 +400,7 @@ async function start(): Promise<void> {
       ],
       favorites: store.get('favorites'),
       efforts: { 'claude-code': ['low', 'medium', 'high', 'xhigh'], codex: codex.models[0]?.efforts || [], opencode: [] },
-      modes: controller.modes().map((mode) => ({ name: mode.name, file: mode.file, errors: mode.errors })),
+      modes: customModes.map((mode) => ({ name: mode.name, file: mode.file, errors: mode.errors })),
       example: JSON.stringify(MODE_EXAMPLE, null, 2),
       burned: store.get('burnedSerials'),
       preburned: shippedRecords().some((record) => record.serial === serial),
@@ -360,7 +420,9 @@ async function start(): Promise<void> {
   }
 
   function broadcast(): void {
-    window?.webContents.send('td-state', snapshot())
+    if (window && !window.isDestroyed() && window.isVisible()) {
+      window.webContents.send('td-state', snapshot())
+    }
     rebuildTray()
   }
 
@@ -441,6 +503,7 @@ async function start(): Promise<void> {
       await shell.openPath(modesDir())
     } else if (call.method === 'saveMode') {
       const saved = await saveMode(call.id, { name: call.name, tiles: call.tiles, knobs: call.knobs })
+      controller.invalidateModes()
       if (controller.activePage() === `custom:${saved.id}`) {
         await controller.selectPage(`custom:${saved.id}`, false)
       } else {
@@ -448,9 +511,11 @@ async function start(): Promise<void> {
       }
     } else if (call.method === 'createMode') {
       const created = await createMode(call.name)
+      controller.invalidateModes()
       await controller.selectPage(`custom:${created.id}`, false)
     } else if (call.method === 'deleteMode') {
       deleteMode(call.id)
+      controller.invalidateModes()
       const bindings = store.get('metalBindings')
       if (bindings) {
         const next = { ...bindings }
@@ -543,8 +608,30 @@ async function start(): Promise<void> {
     if (id === 'opencode') opencode.stop()
   }
 
+  powerMonitor.on('suspend', () => {
+    transport.pause()
+    claude.pause()
+    codex.pause()
+    opencode.pause()
+  })
+  powerMonitor.on('lock-screen', () => {
+    transport.pause()
+    claude.pause()
+    codex.pause()
+    opencode.pause()
+  })
   powerMonitor.on('resume', () => {
+    transport.resume()
     void transport.reconnect()
+    claude.resume()
+    codex.resume()
+    opencode.resume()
+  })
+  powerMonitor.on('unlock-screen', () => {
+    transport.resume()
+    claude.resume()
+    codex.resume()
+    opencode.resume()
   })
   powerMonitor.on('shutdown', () => {
     shutdownCap = 1000
@@ -553,6 +640,10 @@ async function start(): Promise<void> {
     if (quitting) return
     event.preventDefault()
     quitting = true
+    stopAccessibilityPoll()
+    claude.stop()
+    codex.stop()
+    opencode.stop()
     void (async () => {
       const crops = [1, 2, 3, 4, 5, 6].map((key) => fs.readFileSync(resource('welcome-tiles', `key${key}.jpg`)))
       await transport.prepareQuit({ paint: transport.burnFailed ? null : crops, capMs: shutdownCap })
@@ -565,7 +656,6 @@ async function start(): Promise<void> {
 
   transport.start()
   await controller.render(true)
-  void getAllInstalledAppIcons()
   if (wizardOpen && !embedded) openWindow()
   if (parentPid > 0) {
     setInterval(() => {
@@ -574,11 +664,8 @@ async function start(): Promise<void> {
       } catch {
         app.quit()
       }
-    }, 2000)
+    }, 15_000).unref()
   }
-  setInterval(() => {
-    void refreshAccessibilityStatus().finally(() => broadcast())
-  }, 2000)
   log.write('Token Deck ready')
 }
 

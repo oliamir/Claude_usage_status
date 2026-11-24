@@ -33,14 +33,25 @@ final class TokenDeckService: ObservableObject {
     @Published var showSimulatorInPopover: Bool {
         didSet {
             UserDefaults.standard.set(showSimulatorInPopover, forKey: "tokenDeckShowSimulator")
+            if showSimulatorInPopover && popoverVisible && isEnabled {
+                Task { await pollState(includeTiles: true) }
+            }
         }
     }
 
     private var process: Process?
     private var pollTimer: Timer?
     private var terminateObserver: Any?
+    private var sleepObserver: Any?
+    private var wakeObserver: Any?
+    private var popoverVisible = false
+    private var settingsVisible = false
+    private var isSystemAsleep = false
     private var latestUsage: UsageResponse?
     private var lastSyncedUsageAt: Date?
+    private var cachedServerBaseURL: URL?
+    private var cachedURLFileModDate: Date?
+    private var lastTileDataUrls: [String] = Array(repeating: "", count: 6)
     private let session: URLSession = .shared
     private let inputBridge = NativeInputBridge()
 
@@ -64,8 +75,78 @@ final class TokenDeckService: ObservableObject {
             }
         }
 
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isSystemAsleep = true
+                self.pollTimer?.invalidate()
+                self.pollTimer = nil
+            }
+        }
+
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isSystemAsleep = false
+                if self.isEnabled {
+                    self.schedulePollTimer()
+                    Task { await self.pollState(includeTiles: self.shouldFetchTiles) }
+                }
+            }
+        }
+
         if self.isEnabled {
             start()
+        }
+    }
+
+    deinit {
+        if let obs = terminateObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        if let obs = sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+        }
+        if let obs = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+        }
+    }
+
+    private var isUIVisible: Bool {
+        popoverVisible || settingsVisible
+    }
+
+    private var shouldFetchTiles: Bool {
+        popoverVisible && showSimulatorInPopover
+    }
+
+    func setPopoverVisible(_ visible: Bool) {
+        guard popoverVisible != visible else { return }
+        popoverVisible = visible
+        guard isEnabled, !isSystemAsleep else { return }
+        schedulePollTimer()
+        if visible {
+            ensureProcessRunning()
+            Task { await pollState(includeTiles: shouldFetchTiles) }
+        }
+    }
+
+    func setSettingsVisible(_ visible: Bool) {
+        guard settingsVisible != visible else { return }
+        settingsVisible = visible
+        guard isEnabled, !isSystemAsleep else { return }
+        schedulePollTimer()
+        if visible {
+            ensureProcessRunning()
+            Task { await pollState(includeTiles: shouldFetchTiles) }
         }
     }
 
@@ -73,27 +154,36 @@ final class TokenDeckService: ObservableObject {
         guard isEnabled else { return }
         ensureProcessRunning()
         schedulePollTimer()
-        Task { await pollState() }
+        Task { await pollState(includeTiles: shouldFetchTiles) }
     }
 
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
         stopProcess()
-        isRunning = false
-        devicePhase = "idle"
-        deviceMessage = "Token Deck disabled"
+        if isRunning { isRunning = false }
+        if devicePhase != "idle" { devicePhase = "idle" }
+        if deviceMessage != "Token Deck disabled" { deviceMessage = "Token Deck disabled" }
     }
 
     private func schedulePollTimer() {
         pollTimer?.invalidate()
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        guard isEnabled, !isSystemAsleep else {
+            pollTimer = nil
+            return
+        }
+        // Only poll frequently while the menu bar popover or settings window is open.
+        // While closed (99.9% of the time), perform a lightweight health check once per minute.
+        let interval: TimeInterval = isUIVisible ? 3.0 : 60.0
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.isEnabled else { return }
+                guard let self, self.isEnabled, !self.isSystemAsleep else { return }
                 self.ensureProcessRunning()
-                Task { await self.pollState() }
+                let wantTiles = self.shouldFetchTiles
+                Task { await self.pollState(includeTiles: wantTiles) }
             }
         }
+        timer.tolerance = isUIVisible ? 0.5 : 10.0
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
     }
@@ -138,13 +228,31 @@ final class TokenDeckService: ObservableObject {
         proc.environment = env
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
+        proc.terminationHandler = { [weak self] terminated in
+            Task { @MainActor [weak self] in
+                guard let self, self.process === terminated else { return }
+                self.process = nil
+                self.cachedServerBaseURL = nil
+                self.cachedURLFileModDate = nil
+                if self.isRunning { self.isRunning = false }
+                if self.isEnabled && self.devicePhase != "idle" {
+                    self.devicePhase = "idle"
+                    self.deviceMessage = "Token Deck restarting…"
+                }
+            }
+        }
         do {
             try proc.run()
             self.process = proc
-            self.isRunning = true
+            self.cachedServerBaseURL = nil
+            self.cachedURLFileModDate = nil
+            self.lastSyncedUsageAt = nil
+            if !self.isRunning { self.isRunning = true }
         } catch {
-            self.deviceMessage = "Failed to launch Token Deck"
-            self.isRunning = false
+            if self.deviceMessage != "Failed to launch Token Deck" {
+                self.deviceMessage = "Failed to launch Token Deck"
+            }
+            if self.isRunning { self.isRunning = false }
         }
     }
 
@@ -153,52 +261,71 @@ final class TokenDeckService: ObservableObject {
             proc.terminate()
         }
         process = nil
+        cachedServerBaseURL = nil
+        cachedURLFileModDate = nil
         inputBridge.stop()
     }
 
     private func serverBaseURL() -> URL? {
         let urlFile = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".tokendeck/url")
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: urlFile.path)[.modificationDate]) as? Date
+        if let cached = cachedServerBaseURL, let modDate, cachedURLFileModDate == modDate {
+            return cached
+        }
         guard let raw = try? String(contentsOf: urlFile, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty,
               let url = URL(string: raw) else {
             return nil
         }
+        cachedServerBaseURL = url
+        cachedURLFileModDate = modDate
         return url
     }
 
-    func pollState() async {
+    func pollState(includeTiles: Bool = false) async {
         guard let baseURL = serverBaseURL() else { return }
-        let stateURL = baseURL.appendingPathComponent("state")
+        var stateURL = baseURL.appendingPathComponent("state")
+        if !includeTiles, var comps = URLComponents(url: stateURL, resolvingAgainstBaseURL: false) {
+            comps.queryItems = [URLQueryItem(name: "lite", value: "1")]
+            if let liteURL = comps.url {
+                stateURL = liteURL
+            }
+        }
         var request = URLRequest(url: stateURL)
         request.timeoutInterval = 1.5
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
             applyStateJSON(data)
-            if let usage = latestUsage,
-               lastSyncedUsageAt == nil || Date().timeIntervalSince(lastSyncedUsageAt!) > 30 {
+            if let usage = latestUsage, lastSyncedUsageAt == nil {
                 await pushUsageToDeck(usage)
             }
         } catch {
-            // Engine still starting up
+            // Engine still starting up or restarted on a new port
+            cachedServerBaseURL = nil
+            cachedURLFileModDate = nil
         }
     }
 
     private func applyStateJSON(_ data: Data) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        isRunning = true
+        if !isRunning { isRunning = true }
         if let device = root["device"] as? [String: Any] {
-            devicePhase = (device["phase"] as? String) ?? "idle"
-            deviceMessage = (device["message"] as? String) ?? "No deck found"
-            deviceProduct = (device["product"] as? String) ?? ""
-            deviceFirmware = (device["firmware"] as? String) ?? ""
+            let nextPhase = (device["phase"] as? String) ?? "idle"
+            let nextMessage = (device["message"] as? String) ?? "No deck found"
+            let nextProduct = (device["product"] as? String) ?? ""
+            let nextFirmware = (device["firmware"] as? String) ?? ""
+            if devicePhase != nextPhase { devicePhase = nextPhase }
+            if deviceMessage != nextMessage { deviceMessage = nextMessage }
+            if deviceProduct != nextProduct { deviceProduct = nextProduct }
+            if deviceFirmware != nextFirmware { deviceFirmware = nextFirmware }
         }
-        if let m = root["mode"] as? String {
+        if let m = root["mode"] as? String, mode != m {
             mode = m
         }
-        if let ap = root["activePage"] as? String {
+        if let ap = root["activePage"] as? String, activePage != ap {
             activePage = ap
         }
         if let bindings = root["metalBindings"] as? [String: String] {
@@ -230,22 +357,35 @@ final class TokenDeckService: ObservableObject {
                 unique.insert((id: activePage, name: labelFor(activePage)), at: 0)
             }
             if !unique.isEmpty {
-                pageOptions = unique
+                let changed = unique.count != pageOptions.count ||
+                    zip(unique, pageOptions).contains(where: { $0.id != $1.id || $0.name != $1.name })
+                if changed {
+                    pageOptions = unique
+                }
             }
         }
-        if let b = root["brightness"] as? Int {
+        if let b = root["brightness"] as? Int, brightness != b {
             brightness = b
         }
         if let agents = root["agents"] as? [[String: Any]],
            let claude = agents.first(where: { ($0["id"] as? String) == "claude-code" }) {
-            claudeHooksInstalled = (claude["hooks"] as? Bool) ?? false
+            let nextHooks = (claude["hooks"] as? Bool) ?? false
+            if claudeHooksInstalled != nextHooks { claudeHooksInstalled = nextHooks }
         }
         if let tiles = root["tiles"] as? [String] {
-            var decoded: [NSImage?] = Array(repeating: nil, count: 6)
-            for (index, dataUrl) in tiles.prefix(6).enumerated() {
-                decoded[index] = Self.decodeWireTile(dataUrl)
+            var updated = tileImages
+            var anyChanged = false
+            for index in 0..<6 {
+                let dataUrl = index < tiles.count ? tiles[index] : ""
+                if dataUrl != lastTileDataUrls[index] {
+                    lastTileDataUrls[index] = dataUrl
+                    updated[index] = dataUrl.isEmpty ? nil : Self.decodeWireTile(dataUrl)
+                    anyChanged = true
+                }
             }
-            tileImages = decoded
+            if anyChanged {
+                tileImages = updated
+            }
         }
     }
 

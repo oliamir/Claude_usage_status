@@ -30,6 +30,12 @@ struct PopoverView: View {
         }
         .padding()
         .frame(width: 340)
+        .onAppear {
+            tokenDeckService?.setPopoverVisible(true)
+        }
+        .onDisappear {
+            tokenDeckService?.setPopoverVisible(false)
+        }
     }
 
     @ViewBuilder
